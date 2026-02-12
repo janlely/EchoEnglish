@@ -1,0 +1,258 @@
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TouchableOpacity,
+  TextInput,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useDatabase } from '@nozbe/watermelondb/hooks';
+import { Q } from '@nozbe/watermelondb';
+import { Message } from '../database/models';
+
+interface MessageInterface {
+  id: string;
+  text: string;
+  sender: 'me' | 'other';
+  timestamp: string;
+}
+
+const ChatDetailScreen = ({ route, navigation }: any) => {
+  const database = useDatabase();
+  // In a real app, you would get the chat ID from route params
+  const chatId = route?.params?.chatId || 'default';
+  const chatName = route?.params?.chatName || 'Chat';
+  
+  const [messages, setMessages] = useState<MessageInterface[]>([]);
+  const [inputText, setInputText] = useState('');
+
+  useEffect(() => {
+    // Fetch messages from the database for this chat
+    const fetchMessages = async () => {
+      try {
+        const dbMessages = await database.collections
+          .get('messages')
+          .query(Q.where('chat_session_id', chatId))
+          .fetch();
+
+        // Convert database records to the format expected by the UI
+        const formattedMessages = dbMessages.map(msg => ({
+          id: msg.id,
+          text: msg.text,
+          sender: msg.senderId === 'current_user_id' ? 'me' : 'other', // In a real app, you'd have the current user ID
+          timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }));
+
+        setMessages(formattedMessages);
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+      }
+    };
+
+    fetchMessages();
+
+    // Set up a subscription to listen for changes in the database
+    const subscription = database.collections
+      .get('messages')
+      .query(Q.where('chat_session_id', chatId))
+      .observe()
+      .subscribe((dbMessages) => {
+        const formattedMessages = dbMessages.map(msg => ({
+          id: msg.id,
+          text: msg.text,
+          sender: msg.senderId === 'current_user_id' ? 'me' : 'other', // In a real app, you'd have the current user ID
+          timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }));
+        
+        setMessages(formattedMessages);
+      });
+
+    // Clean up subscription when component unmounts
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+    };
+  }, [database, chatId]);
+
+  const handleSendMessage = async () => {
+    if (inputText.trim() === '') return;
+
+    try {
+      // Create a new message in the database
+      const newMessage = await database.write(async () => {
+        return database.collections.get('messages').create(message => {
+          message.text = inputText;
+          message.senderId = 'current_user_id'; // In a real app, you'd have the current user ID
+          message.chatSessionId = chatId;
+          message.status = 'sent';
+          message.timestamp = Date.now();
+        });
+      });
+
+      // Clear the input
+      setInputText('');
+      
+      // The message will appear in the list due to the subscription
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
+
+      {/* Chat Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>‹</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{chatName}</Text>
+        <View style={styles.headerRight} />
+      </View>
+
+      {/* Messages List */}
+      <View style={styles.messagesContainer}>
+        {messages.map((message) => (
+          <View
+            key={message.id}
+            style={[
+              styles.messageBubble,
+              message.sender === 'me' ? styles.myMessage : styles.otherMessage
+            ]}
+          >
+            <Text style={[
+              styles.messageText,
+              message.sender === 'me' ? styles.myMessageText : styles.otherMessageText
+            ]}>
+              {message.text}
+            </Text>
+            <Text style={styles.messageTime}>{message.timestamp}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Input Area */}
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.textInput}
+          placeholder="输入消息..."
+          multiline
+          value={inputText}
+          onChangeText={setInputText}
+        />
+        <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
+          <Text style={styles.sendButtonText}>发送</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f0f2f5',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#f8f8f8',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 15,
+  },
+  backButtonText: {
+    fontSize: 24,
+    fontWeight: 'normal',
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  headerRight: {
+    width: 30, // Spacer to balance the layout
+  },
+  messagesContainer: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  messageBubble: {
+    maxWidth: '80%',
+    padding: 10,
+    marginVertical: 5,
+    borderRadius: 10,
+    position: 'relative',
+  },
+  myMessage: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#007AFF',
+  },
+  otherMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ffffff',
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  myMessageText: {
+    color: '#ffffff',
+  },
+  otherMessageText: {
+    color: '#333333',
+  },
+  messageTime: {
+    fontSize: 12,
+    color: '#999999',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    padding: 10,
+    backgroundColor: '#f8f8f8',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    maxHeight: 100,
+    marginRight: 10,
+    fontSize: 16,
+  },
+  sendButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  sendButtonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+  },
+});
+
+export default ChatDetailScreen;
