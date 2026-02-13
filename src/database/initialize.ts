@@ -1,5 +1,6 @@
 import { database } from './index';
 import { ChatSession, Message, User } from './models';
+import { Collection } from '@nozbe/watermelondb';
 
 // Initialize the database with sample data
 export const initializeDatabase = async () => {
@@ -47,11 +48,16 @@ export const initializeDatabase = async () => {
       { id: '11', text: '好的，没问题！到时候见', senderId: 'current_user_id', chatSessionId: '1', status: 'read', timestamp: Date.now() - 3100000 },
     ];
 
+    // Get typed collections
+    const usersCollection = database.collections.get('users') as Collection<User>;
+    const chatSessionsCollection = database.collections.get('chat_sessions') as Collection<ChatSession>;
+    const messagesCollection = database.collections.get('messages') as Collection<Message>;
+
     // Write sample data to the database
     await database.write(async () => {
       // Create users
       for (const userData of usersData) {
-        await database.collections.get('users').create(user => {
+        await usersCollection.create(user => {
           user._raw.id = userData.id;
           user.name = userData.name;
           user.email = userData.email;
@@ -63,7 +69,7 @@ export const initializeDatabase = async () => {
 
       // Create chat sessions
       for (const sessionData of chatSessionsData) {
-        await database.collections.get('chat_sessions').create(session => {
+        await chatSessionsCollection.create(session => {
           session._raw.id = sessionData.id;
           session.name = sessionData.name;
           session.type = sessionData.type;
@@ -71,7 +77,7 @@ export const initializeDatabase = async () => {
           session.isOnline = sessionData.isOnline;
           session.createdAt = Date.now();
           session.updatedAt = Date.now();
-          
+
           // Set the last message ID to one of the messages in this chat
           if (sessionData.id === '1') {
             session.lastMessageId = '11'; // Last message in chat 1
@@ -91,7 +97,7 @@ export const initializeDatabase = async () => {
 
       // Create messages
       for (const messageData of messagesData) {
-        await database.collections.get('messages').create(message => {
+        await messagesCollection.create(message => {
           message._raw.id = messageData.id;
           message.text = messageData.text;
           message.senderId = messageData.senderId;

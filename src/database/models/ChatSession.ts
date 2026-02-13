@@ -17,31 +17,26 @@ export default class ChatSession extends Model {
   type!: string; // 'direct' or 'group'
 
   @field('last_message_id')
-  lastMessageId!: string;
+  lastMessageId?: string;
 
   @field('unread_count')
-  unreadCount!: number;
+  unreadCount?: number;
+
+  @field('is_online')
+  isOnline?: boolean;
 
   @field('is_archived')
-  isArchived!: boolean;
+  isArchived?: boolean;
 
   @field('is_muted')
-  isMuted!: boolean;
+  isMuted?: boolean;
 
   @field('avatar_url')
-  avatarUrl!: string;
+  avatarUrl?: string;
 
   @date('created_at')
   createdAt!: number;
 
   @date('updated_at')
   updatedAt!: number;
-
-  @readonly
-  @date('created_at')
-  readonly createdAt!: number;
-
-  @readonly
-  @date('updated_at')
-  readonly updatedAt!: number;
 }

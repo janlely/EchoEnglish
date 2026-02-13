@@ -76,13 +76,19 @@ const ChatSessionItem = ({
 const MainScreen = ({ navigation }: any) => {
   const database = useDatabase();
   const [chatSessions, setChatSessions] = useState<ChatSessionInterface[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Fetch chat sessions from the database
     const fetchChatSessions = async () => {
       try {
+        if (!database) {
+          console.error('Database is not available');
+          return;
+        }
+        
         const sessions = await database.collections
-          .get('chat_sessions')
+          .get<ChatSession>('chat_sessions')
           .query()
           .fetch();
 
@@ -100,36 +106,40 @@ const MainScreen = ({ navigation }: any) => {
         setChatSessions(formattedSessions);
       } catch (error) {
         console.error('Error fetching chat sessions:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
-    fetchChatSessions();
+    if (database) {
+      fetchChatSessions();
 
-    // Set up a subscription to listen for changes in the database
-    const subscription = database.collections
-      .get('chat_sessions')
-      .query()
-      .observe()
-      .subscribe((sessions) => {
-        const formattedSessions = sessions.map(session => ({
-          id: session.id,
-          name: session.name,
-          lastMessage: 'Loading...', // We'll fetch the actual last message later
-          timestamp: new Date(session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          unreadCount: session.unreadCount,
-          avatar: session.avatarUrl,
-          isOnline: true, // We'll determine this based on user status
-        }));
-        
-        setChatSessions(formattedSessions);
-      });
+      // Set up a subscription to listen for changes in the database
+      const subscription = database.collections
+        .get<ChatSession>('chat_sessions')
+        .query()
+        .observe()
+        .subscribe((sessions) => {
+          const formattedSessions = sessions.map(session => ({
+            id: session.id,
+            name: session.name,
+            lastMessage: 'Loading...', // We'll fetch the actual last message later
+            timestamp: new Date(session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            unreadCount: session.unreadCount,
+            avatar: session.avatarUrl,
+            isOnline: true, // We'll determine this based on user status
+          }));
+          
+          setChatSessions(formattedSessions);
+        });
 
-    // Clean up subscription when component unmounts
-    return () => {
-      if (subscription) {
-        subscription.unsubscribe();
-      }
-    };
+      // Clean up subscription when component unmounts
+      return () => {
+        if (subscription) {
+          subscription.unsubscribe();
+        }
+      };
+    }
   }, [database]);
 
   const handleChatPress = (sessionId: string) => {
@@ -151,6 +161,16 @@ const MainScreen = ({ navigation }: any) => {
     />
   );
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text>Loading chats...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
@@ -171,6 +191,11 @@ const MainScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   listContainer: {
     flex: 1,

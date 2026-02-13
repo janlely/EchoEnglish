@@ -1,9 +1,9 @@
-import { appSchema, table } from '@nozbe/watermelondb';
+import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
   version: 1,
   tables: [
-    table({
+    tableSchema({
       name: 'users',
       columns: [
         { name: 'name', type: 'string' },
@@ -14,13 +14,14 @@ export const schema = appSchema({
         { name: 'updated_at', type: 'number' },
       ],
     }),
-    table({
+    tableSchema({
       name: 'chat_sessions',
       columns: [
         { name: 'name', type: 'string' },
         { name: 'type', type: 'string' }, // 'direct' or 'group'
         { name: 'last_message_id', type: 'string', isOptional: true },
         { name: 'unread_count', type: 'number', isOptional: true },
+        { name: 'is_online', type: 'boolean', isOptional: true },
         { name: 'is_archived', type: 'boolean', isOptional: true },
         { name: 'is_muted', type: 'boolean', isOptional: true },
         { name: 'avatar_url', type: 'string', isOptional: true },
@@ -28,7 +29,7 @@ export const schema = appSchema({
         { name: 'updated_at', type: 'number' },
       ],
     }),
-    table({
+    tableSchema({
       name: 'messages',
       columns: [
         { name: 'text', type: 'string' },
@@ -43,7 +44,7 @@ export const schema = appSchema({
         { name: 'updated_at', type: 'number' },
       ],
     }),
-    table({
+    tableSchema({
       name: 'chat_participants',
       columns: [
         { name: 'chat_session_id', type: 'string' },
@@ -55,7 +56,7 @@ export const schema = appSchema({
         { name: 'updated_at', type: 'number' },
       ],
     }),
-    table({
+    tableSchema({
       name: 'user_settings',
       columns: [
         { name: 'key', type: 'string' },

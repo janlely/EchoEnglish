@@ -78,7 +78,7 @@ export const createMessage = async (data: Partial<Message>) => {
 // Update chat session last message
 export const updateChatSessionLastMessage = async (chatSessionId: string, messageId: string) => {
   try {
-    const chatSession = await getChatSessionById(chatSessionId);
+    const chatSession = await getChatSessionById(chatSessionId) as ChatSession;
     if (!chatSession) {
       throw new Error(`Chat session with id ${chatSessionId} not found`);
     }
@@ -100,7 +100,7 @@ export const updateChatSessionLastMessage = async (chatSessionId: string, messag
 // Increment unread count for a chat session
 export const incrementUnreadCount = async (chatSessionId: string) => {
   try {
-    const chatSession = await getChatSessionById(chatSessionId);
+    const chatSession = await getChatSessionById(chatSessionId) as ChatSession;
     if (!chatSession) {
       throw new Error(`Chat session with id ${chatSessionId} not found`);
     }
@@ -122,7 +122,7 @@ export const incrementUnreadCount = async (chatSessionId: string) => {
 // Reset unread count for a chat session
 export const resetUnreadCount = async (chatSessionId: string) => {
   try {
-    const chatSession = await getChatSessionById(chatSessionId);
+    const chatSession = await getChatSessionById(chatSessionId) as ChatSession;
     if (!chatSession) {
       throw new Error(`Chat session with id ${chatSessionId} not found`);
     }

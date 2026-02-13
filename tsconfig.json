@@ -1,6 +1,8 @@
 {
   "extends": "@react-native/typescript-config",
   "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "types": ["jest"]
   },
   "include": ["**/*.ts", "**/*.tsx"],

@@ -12,7 +12,6 @@ export const database = new Database({
     ChatParticipant,
     UserSetting,
   ],
-  actionsEnabled: true,
 });
 
 // Export types for convenience

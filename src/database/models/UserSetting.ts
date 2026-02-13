@@ -6,7 +6,7 @@ export default class UserSetting extends Model {
   static table = 'user_settings';
 
   static associations: Associations = {
-    user: { type: 'belongs_to', key: 'user_id', foreignKey: 'users' },
+    user: { type: 'belongs_to', key: 'user_id' },
   };
 
   @field('key')
@@ -16,19 +16,11 @@ export default class UserSetting extends Model {
   value!: string;
 
   @field('user_id')
-  userId!: string;
+  userId?: string;
 
   @date('created_at')
   createdAt!: number;
 
   @date('updated_at')
   updatedAt!: number;
-
-  @readonly
-  @date('created_at')
-  readonly createdAt!: number;
-
-  @readonly
-  @date('updated_at')
-  readonly updatedAt!: number;
 }

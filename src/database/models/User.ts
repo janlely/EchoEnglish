@@ -14,25 +14,17 @@ export default class User extends Model {
   name!: string;
 
   @field('email')
-  email!: string;
+  email?: string;
 
   @field('avatar_url')
-  avatarUrl!: string;
+  avatarUrl?: string;
 
   @field('is_online')
-  isOnline!: boolean;
+  isOnline?: boolean;
 
   @date('created_at')
   createdAt!: number;
 
   @date('updated_at')
   updatedAt!: number;
-
-  @readonly
-  @date('created_at')
-  readonly createdAt!: number;
-
-  @readonly
-  @date('updated_at')
-  readonly updatedAt!: number;
 }

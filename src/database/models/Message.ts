@@ -6,8 +6,8 @@ export default class Message extends Model {
   static table = 'messages';
 
   static associations: Associations = {
-    sender: { type: 'belongs_to', key: 'sender_id', foreignKey: 'users' },
-    chat_session: { type: 'belongs_to', key: 'chat_session_id', foreignKey: 'chat_sessions' },
+    sender: { type: 'belongs_to', key: 'sender_id' },
+    chat_session: { type: 'belongs_to', key: 'chat_session_id' },
   };
 
   @field('text')
@@ -26,25 +26,17 @@ export default class Message extends Model {
   timestamp!: number;
 
   @field('reply_to_message_id')
-  replyToMessageId!: string;
+  replyToMessageId?: string;
 
   @field('media_url')
-  mediaUrl!: string;
+  mediaUrl?: string;
 
   @field('media_type')
-  mediaType!: string; // 'image', 'video', 'audio', 'document'
+  mediaType?: string; // 'image', 'video', 'audio', 'document'
 
   @date('created_at')
   createdAt!: number;
 
   @date('updated_at')
   updatedAt!: number;
-
-  @readonly
-  @date('created_at')
-  readonly createdAt!: number;
-
-  @readonly
-  @date('updated_at')
-  readonly updatedAt!: number;
 }

@@ -27,63 +27,79 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
   
   const [messages, setMessages] = useState<MessageInterface[]>([]);
   const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Fetch messages from the database for this chat
     const fetchMessages = async () => {
       try {
+        if (!database) {
+          console.error('Database is not available');
+          return;
+        }
+        
         const dbMessages = await database.collections
-          .get('messages')
+          .get<Message>('messages')
           .query(Q.where('chat_session_id', chatId))
           .fetch();
 
         // Convert database records to the format expected by the UI
-        const formattedMessages = dbMessages.map(msg => ({
-          id: msg.id,
-          text: msg.text,
-          sender: msg.senderId === 'current_user_id' ? 'me' : 'other', // In a real app, you'd have the current user ID
-          timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        }));
+        const formattedMessages = dbMessages.map(msg => {
+          const sender: 'me' | 'other' = msg.senderId === 'current_user_id' ? 'me' : 'other'; // In a real app, you'd have the current user ID
+          return {
+            id: msg.id,
+            text: msg.text,
+            sender,
+            timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+        });
 
         setMessages(formattedMessages);
       } catch (error) {
         console.error('Error fetching messages:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
-    fetchMessages();
+    if (database) {
+      fetchMessages();
 
-    // Set up a subscription to listen for changes in the database
-    const subscription = database.collections
-      .get('messages')
-      .query(Q.where('chat_session_id', chatId))
-      .observe()
-      .subscribe((dbMessages) => {
-        const formattedMessages = dbMessages.map(msg => ({
-          id: msg.id,
-          text: msg.text,
-          sender: msg.senderId === 'current_user_id' ? 'me' : 'other', // In a real app, you'd have the current user ID
-          timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        }));
-        
-        setMessages(formattedMessages);
-      });
+      // Set up a subscription to listen for changes in the database
+      const subscription = database.collections
+        .get<Message>('messages')
+        .query(Q.where('chat_session_id', chatId))
+        .observe()
+        .subscribe((dbMessages) => {
+          const formattedMessages = dbMessages.map(msg => {
+            const sender: 'me' | 'other' = msg.senderId === 'current_user_id' ? 'me' : 'other'; // In a real app, you'd have the current user ID
+            return {
+              id: msg.id,
+              text: msg.text,
+              sender,
+              timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            };
+          });
+          
+          setMessages(formattedMessages);
+        });
 
-    // Clean up subscription when component unmounts
-    return () => {
-      if (subscription) {
-        subscription.unsubscribe();
-      }
-    };
+      // Clean up subscription when component unmounts
+      return () => {
+        if (subscription) {
+          subscription.unsubscribe();
+        }
+      };
+    }
   }, [database, chatId]);
 
   const handleSendMessage = async () => {
-    if (inputText.trim() === '') return;
+    if (inputText.trim() === '' || !database) return;
 
     try {
       // Create a new message in the database
       const newMessage = await database.write(async () => {
-        return database.collections.get('messages').create(message => {
+        return database.collections.get<Message>('messages').create(message => {
           message.text = inputText;
           message.senderId = 'current_user_id'; // In a real app, you'd have the current user ID
           message.chatSessionId = chatId;
@@ -100,6 +116,16 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
       console.error('Error sending message:', error);
     }
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text>Loading chat...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -159,6 +185,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f0f2f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',

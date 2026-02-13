@@ -124,6 +124,7 @@ android/.gradle
 android/caches
 android/gradle/wrapper/dists
 android/build/
+android/app/.cxx
 *.ap_
 *.aar
 
