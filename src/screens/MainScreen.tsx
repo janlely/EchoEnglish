@@ -8,6 +8,7 @@ import {
   StatusBar,
   Image,
   TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
@@ -77,6 +78,34 @@ const MainScreen = ({ navigation }: any) => {
   const database = useDatabase();
   const [chatSessions, setChatSessions] = useState<ChatSessionInterface[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 设置页面标题和自定义头部
+    navigation.setOptions({
+      headerShown: true,
+      headerStyle: {
+        backgroundColor: '#f8f8f8',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+      },
+      headerTitle: 'EchoEnglish',
+      headerTitleAlign: 'center',
+      headerTitleStyle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+      },
+      headerLeft: () => (
+        <TouchableOpacity style={{ paddingLeft: 16 }}>
+          <Text style={{ fontSize: 20 }}>☰</Text>
+        </TouchableOpacity>
+      ),
+      headerRight: () => (
+        <TouchableOpacity style={{ paddingRight: 16 }}>
+          <Text style={{ fontSize: 20 }}>+</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
 
   useEffect(() => {
     // Fetch chat sessions from the database
@@ -163,27 +192,22 @@ const MainScreen = ({ navigation }: any) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <Text>Loading chats...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-
-      {/* Chat Sessions List */}
-      <FlatList
-        data={chatSessions}
-        renderItem={renderChatItem}
-        keyExtractor={(item) => item.id}
-        style={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-      />
-    </SafeAreaView>
+    <FlatList
+      data={chatSessions}
+      renderItem={renderChatItem}
+      keyExtractor={(item) => item.id}
+      style={styles.listContainer}
+      showsVerticalScrollIndicator={false}
+    />
   );
 };
 
@@ -199,7 +223,8 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    // backgroundColor: '#f8f8f8',
+    backgroundColor: 'red',
   },
   chatItemContainer: {
     flexDirection: 'row',

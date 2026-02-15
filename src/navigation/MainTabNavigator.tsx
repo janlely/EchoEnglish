@@ -10,7 +10,7 @@ const Stack = createStackNavigator();
 
 // Chat Stack Navigator to handle chat details
 const ChatStack = () => (
-  <Stack.Navigator screenOptions={{ headerShown: false }}>
+  <Stack.Navigator screenOptions={{ headerShown: true}}>
     <Stack.Screen name="MainChat" component={MainScreen} />
     <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
   </Stack.Navigator>
@@ -60,25 +60,25 @@ const MainTabNavigator = () => {
         headerShown: false,
       })}
     >
-      <Tab.Screen 
-        name="Chats" 
-        component={ChatStack} 
-        options={{ title: '微信' }} 
+      <Tab.Screen
+        name="Chats"
+        component={ChatStack}
+        options={{ title: '消息' }}
       />
-      <Tab.Screen 
-        name="Contacts" 
-        component={ContactsScreen} 
-        options={{ title: '通讯录' }} 
+      <Tab.Screen
+        name="Contacts"
+        component={ContactsScreen}
+        options={{ title: '通讯录' }}
       />
-      <Tab.Screen 
-        name="Discover" 
-        component={DiscoverScreen} 
-        options={{ title: '发现' }} 
+      <Tab.Screen
+        name="Discover"
+        component={DiscoverScreen}
+        options={{ title: '发现' }}
       />
-      <Tab.Screen 
-        name="Profile" 
-        component={ProfileScreen} 
-        options={{ title: '我' }} 
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ title: '我' }}
       />
     </Tab.Navigator>
   );
@@ -92,5 +92,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
   },
 });
+
 
 export default MainTabNavigator;

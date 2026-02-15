@@ -24,6 +24,37 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
   // In a real app, you would get the chat ID from route params
   const chatId = route?.params?.chatId || 'default';
   const chatName = route?.params?.chatName || 'Chat';
+
+  useEffect(() => {
+    // 设置页面标题和自定义头部
+    navigation.setOptions({
+      headerShown: true,
+      headerStyle: {
+        backgroundColor: '#f8f8f8',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+      },
+      headerTitle: chatName,
+      headerTitleAlign: 'center',
+      headerTitleStyle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+      },
+      headerLeft: () => (
+        <TouchableOpacity 
+          style={{ paddingLeft: 16 }}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={{ fontSize: 24, fontWeight: 'normal' }}>‹</Text>
+        </TouchableOpacity>
+      ),
+      headerRight: () => (
+        <TouchableOpacity style={{ paddingRight: 16 }}>
+          <Text style={{ fontSize: 20 }}>⋮</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, chatName]);
   
   const [messages, setMessages] = useState<MessageInterface[]>([]);
   const [inputText, setInputText] = useState('');
@@ -128,22 +159,8 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-
-      {/* Chat Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{chatName}</Text>
-        <View style={styles.headerRight} />
-      </View>
-
-      {/* Messages List */}
+    <View style={styles.container}>
+      {/* Messages List - 现在从屏幕顶部开始，因为头部由导航器处理 */}
       <View style={styles.messagesContainer}>
         {messages.map((message) => (
           <View
@@ -177,7 +194,7 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
           <Text style={styles.sendButtonText}>发送</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -190,35 +207,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#f8f8f8',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  backButton: {
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 15,
-  },
-  backButtonText: {
-    fontSize: 24,
-    fontWeight: 'normal',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  headerRight: {
-    width: 30, // Spacer to balance the layout
   },
   messagesContainer: {
     flex: 1,
