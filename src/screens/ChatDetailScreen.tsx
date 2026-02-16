@@ -12,6 +12,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
 import { Message } from '../database/models';
+import { ChatDetailScreenNavigationProp, ChatDetailScreenRouteProp } from '../types/navigation';
+import { RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
 interface MessageInterface {
   id: string;
@@ -20,17 +23,30 @@ interface MessageInterface {
   timestamp: string;
 }
 
-const ChatDetailScreen = ({ route, navigation }: any) => {
+const ChatDetailScreen = () => {
+  const navigation = useNavigation<ChatDetailScreenNavigationProp>();
+  const route = useRoute<ChatDetailScreenRouteProp>();
+  const parentNavigation = useNavigation();
+  const tabNavigation = parentNavigation.getParent();
+  
   const database = useDatabase();
   // In a real app, you would get the chat ID from route params
-  const chatId = route?.params?.chatId || 'default';
-  const chatName = route?.params?.chatName || 'Chat';
+  const chatId = route.params.chatId;
+  const chatName = route.params.chatName;
 
   const scrollViewRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
     console.log("insets.bottom", insets.bottom);
+    
+    // Hide the tab bar when this screen is active
+    if (tabNavigation) {
+      tabNavigation.setOptions({
+        tabBarStyle: { display: 'none' },
+      });
+    }
+    
     // 设置页面标题和自定义头部
     navigation.setOptions({
       headerShown: true,
@@ -59,7 +75,16 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, chatName]);
+
+    // Cleanup function to restore the tab bar when leaving this screen
+    return () => {
+      if (tabNavigation) {
+        tabNavigation.setOptions({
+          tabBarStyle: {} // Restore default tab bar style
+        });
+      }
+    };
+  }, [navigation, chatName, tabNavigation]);
   
   const [messages, setMessages] = useState<MessageInterface[]>([]);
   const [inputText, setInputText] = useState('');
@@ -76,7 +101,10 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
         
         const dbMessages = await database.collections
           .get<Message>('messages')
-          .query(Q.where('chat_session_id', chatId))
+          .query(
+            Q.where('chat_session_id', chatId),
+            Q.sortBy('timestamp', Q.desc)
+          )
           .fetch();
 
         // Convert database records to the format expected by the UI
@@ -104,7 +132,10 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
       // Set up a subscription to listen for changes in the database
       const subscription = database.collections
         .get<Message>('messages')
-        .query(Q.where('chat_session_id', chatId))
+        .query(
+          Q.where('chat_session_id', chatId),
+          Q.sortBy('timestamp', Q.desc)
+        )
         .observe()
         .subscribe((dbMessages) => {
           const formattedMessages = dbMessages.map(msg => {
@@ -116,7 +147,7 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
               timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             };
           });
-          
+
           setMessages(formattedMessages);
         });
 

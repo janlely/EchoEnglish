@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
 import { ChatSession } from '../database/models';
+import { MainScreenNavigationProp } from '../types/navigation';
+import { useNavigation } from '@react-navigation/native';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -74,7 +76,8 @@ const ChatSessionItem = ({
 };
 
 // Main Screen Component
-const MainScreen = ({ navigation }: any) => {
+const MainScreen = () => {
+  const navigation = useNavigation<MainScreenNavigationProp>();
   const database = useDatabase();
   const [chatSessions, setChatSessions] = useState<ChatSessionInterface[]>([]);
   const [loading, setLoading] = useState(true);
