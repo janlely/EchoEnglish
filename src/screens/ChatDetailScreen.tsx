@@ -7,6 +7,7 @@ import {
   TextInput,
   FlatList,
   Platform,
+  Modal,
 } from 'react-native';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -109,6 +110,7 @@ const ChatDetailScreen = () => {
   const [messages, setMessages] = useState<MessageInterface[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showTranslationModal, setShowTranslationModal] = useState(false);
 
   useEffect(() => {
     // Fetch messages from the database for this chat
@@ -197,10 +199,44 @@ const ChatDetailScreen = () => {
 
       // Clear the input
       setInputText('');
-      
+
       // The message will appear in the list due to the subscription
     } catch (error) {
       console.error('Error sending message:', error);
+    }
+  };
+
+  const handleLongPress = () => {
+    if (inputText.trim() === '') return;
+    setShowTranslationModal(true);
+  };
+
+  const handleCloseTranslationModal = () => {
+    setShowTranslationModal(false);
+  };
+
+  const handleAcceptTranslation = async () => {
+    if (!database) return;
+
+    try {
+      // 使用翻译结果（hello world）作为消息发送
+      const translationResult = 'hello world';
+      const newMessage = await database.write(async () => {
+        return database.collections.get<Message>('messages').create(message => {
+          message.text = translationResult;
+          message.senderId = 'current_user_id';
+          message.chatSessionId = chatId;
+          message.status = 'sent';
+          message.timestamp = Date.now();
+        });
+      });
+
+      // 清空输入框
+      setInputText('');
+      // 关闭模态框
+      setShowTranslationModal(false);
+    } catch (error) {
+      console.error('Error sending translation:', error);
     }
   };
 
@@ -286,11 +322,45 @@ const ChatDetailScreen = () => {
               }, 200); // 增加延迟以确保动画完成
             }}
           />
-          <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
+          <TouchableOpacity
+            style={styles.sendButton}
+            onPress={handleSendMessage}
+            onLongPress={handleLongPress}
+            delayLongPress={500}
+          >
             <Text style={styles.sendButtonText}>发送</Text>
           </TouchableOpacity>
         </View>
       </KeyboardStickyView>
+
+      {/* 翻译结果模态框 */}
+      <Modal
+        visible={showTranslationModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseTranslationModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>翻译结果</Text>
+            <Text style={styles.modalTranslation}>hello world</Text>
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={handleCloseTranslationModal}
+              >
+                <Text style={styles.modalCloseButtonText}>关闭</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalAcceptButton}
+                onPress={handleAcceptTranslation}
+              >
+                <Text style={styles.modalAcceptButtonText}>接受</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -379,6 +449,66 @@ const styles = StyleSheet.create({
   sendButtonText: {
     color: '#ffffff',
     fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 30,
+    width: '85%',
+    maxWidth: 400,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 20,
+  },
+  modalTranslation: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 30,
+    lineHeight: 24,
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  modalCloseButton: {
+    backgroundColor: '#999999',
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+    flex: 1,
+    marginRight: 10,
+  },
+  modalCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  modalAcceptButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+    flex: 1,
+    marginLeft: 10,
+  },
+  modalAcceptButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });
 

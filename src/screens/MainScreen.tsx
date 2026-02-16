@@ -226,8 +226,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     flex: 1,
-    // backgroundColor: '#f8f8f8',
-    backgroundColor: 'red',
+    backgroundColor: '#f8f8f8',
   },
   chatItemContainer: {
     flexDirection: 'row',
