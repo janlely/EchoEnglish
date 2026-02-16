@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  StatusBar,
   TouchableOpacity,
   TextInput,
+  FlatList,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
 import { Message } from '../database/models';
@@ -25,7 +26,11 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
   const chatId = route?.params?.chatId || 'default';
   const chatName = route?.params?.chatName || 'Chat';
 
+  const scrollViewRef = useRef<FlatList>(null);
+  const insets = useSafeAreaInsets();
+
   useEffect(() => {
+    console.log("insets.bottom", insets.bottom);
     // 设置页面标题和自定义头部
     navigation.setOptions({
       headerShown: true,
@@ -41,7 +46,7 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
         fontWeight: 'bold',
       },
       headerLeft: () => (
-        <TouchableOpacity 
+        <TouchableOpacity
           style={{ paddingLeft: 16 }}
           onPress={() => navigation.goBack()}
         >
@@ -158,42 +163,72 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
     );
   }
 
+  // 渲染单条消息的函数
+  const renderMessage = ({ item }: { item: MessageInterface }) => (
+    <View
+      style={[
+        styles.messageBubble,
+        item.sender === 'me' ? styles.myMessage : styles.otherMessage
+      ]}
+    >
+      <Text style={[
+        styles.messageText,
+        item.sender === 'me' ? styles.myMessageText : styles.otherMessageText
+      ]}>
+        {item.text}
+      </Text>
+      <Text style={styles.messageTime}>{item.timestamp}</Text>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
-      {/* Messages List - 现在从屏幕顶部开始，因为头部由导航器处理 */}
-      <View style={styles.messagesContainer}>
-        {messages.map((message) => (
-          <View
-            key={message.id}
-            style={[
-              styles.messageBubble,
-              message.sender === 'me' ? styles.myMessage : styles.otherMessage
-            ]}
-          >
-            <Text style={[
-              styles.messageText,
-              message.sender === 'me' ? styles.myMessageText : styles.otherMessageText
-            ]}>
-              {message.text}
-            </Text>
-            <Text style={styles.messageTime}>{message.timestamp}</Text>
-          </View>
-        ))}
-      </View>
+      <FlatList
+        ref={scrollViewRef}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={(item) => item.id}
+        inverted // 最新的消息在底部
+        style={styles.messagesContainer}
+        contentContainerStyle={styles.flatListContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => {
+          // 当内容改变时，自动滚动到底部（即最新消息，因为是inverted）
+          const scrollRef = scrollViewRef.current;
+          if (scrollRef && typeof scrollRef.scrollToOffset === 'function') {
+            // 滚动到顶部，因为列表是倒置的
+            scrollRef.scrollToOffset({ offset: 0, animated: true });
+          }
+        }}
+      />
 
-      {/* Input Area */}
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.textInput}
-          placeholder="输入消息..."
-          multiline
-          value={inputText}
-          onChangeText={setInputText}
-        />
-        <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
-          <Text style={styles.sendButtonText}>发送</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Input Area - 使用KeyboardStickyView处理键盘避让 */}
+      <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.textInput}
+            placeholder="输入消息..."
+            multiline
+            value={inputText}
+            onChangeText={setInputText}
+            blurOnSubmit={false}
+            onFocus={() => {
+              // 键盘打开时，滚动到最新消息
+              setTimeout(() => {
+                const scrollRef = scrollViewRef.current;
+                if (scrollRef && typeof scrollRef.scrollToOffset === 'function') {
+                  // 滚动到顶部，因为列表是倒置的
+                  scrollRef.scrollToOffset({ offset: 0, animated: true });
+                }
+              }, 100); // 较短的延迟以快速响应
+            }}
+          />
+          <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
+            <Text style={styles.sendButtonText}>发送</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardStickyView>
     </View>
   );
 };
@@ -201,7 +236,8 @@ const ChatDetailScreen = ({ route, navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f2f5',
+    // backgroundColor: '#f0f2f5',
+    backgroundColor: 'green',
   },
   loadingContainer: {
     flex: 1,
@@ -212,6 +248,15 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 10,
     paddingVertical: 10,
+  },
+  scrollViewContent: {
+    paddingBottom: 10,
+  },
+  flatListContent: {
+    paddingVertical: 10,
+  },
+  inputContainerWrapper: {
+    // 包装输入容器，便于动画处理
   },
   messageBubble: {
     maxWidth: '80%',
@@ -247,9 +292,10 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: 10,
-    backgroundColor: '#f8f8f8',
-    borderTopWidth: 1,
+    padding: 5,
+    backgroundColor: 'red',
+    // backgroundColor: '#f8f8f8',
+    // borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
   },
   textInput: {

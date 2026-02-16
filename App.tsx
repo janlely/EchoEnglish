@@ -6,6 +6,7 @@
 import { StatusBar, StyleSheet, View, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import MainTabNavigator from './src/navigation/MainTabNavigator';
 import { database } from './src/database';
 import { DatabaseProvider } from '@nozbe/watermelondb/react';
@@ -40,12 +41,14 @@ function App() {
   return (
     <DatabaseProvider database={database}>
       <SafeAreaProvider>
-        <NavigationContainer>
-          <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-          <View style={styles.container}>
-            <MainTabNavigator />
-          </View>
-        </NavigationContainer>
+        <KeyboardProvider>
+          <NavigationContainer>
+            <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
+            <View style={styles.container}>
+              <MainTabNavigator />
+            </View>
+          </NavigationContainer>
+        </KeyboardProvider>
       </SafeAreaProvider>
     </DatabaseProvider>
   );
