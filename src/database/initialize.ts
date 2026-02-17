@@ -62,8 +62,8 @@ export const initializeDatabase = async () => {
           user.name = userData.name;
           user.email = userData.email;
           user.isOnline = userData.isOnline;
-          user.createdAt = Date.now();
-          user.updatedAt = Date.now();
+          (user._raw as any).created_at = Date.now();
+          (user._raw as any).updated_at = Date.now();
         });
       }
 
@@ -75,8 +75,8 @@ export const initializeDatabase = async () => {
           session.type = sessionData.type;
           session.unreadCount = sessionData.unreadCount;
           session.isOnline = sessionData.isOnline;
-          session.createdAt = Date.now();
-          session.updatedAt = Date.now();
+          (session._raw as any).created_at = Date.now();
+          (session._raw as any).updated_at = Date.now();
 
           // Set the last message ID to one of the messages in this chat
           if (sessionData.id === '1') {
@@ -104,8 +104,8 @@ export const initializeDatabase = async () => {
           message.chatSessionId = messageData.chatSessionId;
           message.status = messageData.status;
           message.timestamp = messageData.timestamp;
-          message.createdAt = Date.now();
-          message.updatedAt = Date.now();
+          (message._raw as any).created_at = Date.now();
+          (message._raw as any).updated_at = Date.now();
         });
       }
     });

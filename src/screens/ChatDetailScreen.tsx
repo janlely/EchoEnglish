@@ -24,6 +24,7 @@ import { Message } from '../database/models';
 import { ChatDetailScreenNavigationProp, ChatDetailScreenRouteProp } from '../types/navigation';
 import { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useWebSocket } from '../contexts/WebSocketContext';
 
 interface MessageInterface {
   id: string;
@@ -37,7 +38,8 @@ const ChatDetailScreen = () => {
   const route = useRoute<ChatDetailScreenRouteProp>();
   const parentNavigation = useNavigation();
   const tabNavigation = parentNavigation.getParent();
-  
+  const { sendMessage, joinChat, leaveChat, onMessage } = useWebSocket();
+
   const database = useDatabase();
   // In a real app, you would get the chat ID from route params
   const chatId = route.params.chatId;
@@ -186,21 +188,11 @@ const ChatDetailScreen = () => {
     if (inputText.trim() === '' || !database) return;
 
     try {
-      // Create a new message in the database
-      const newMessage = await database.write(async () => {
-        return database.collections.get<Message>('messages').create(message => {
-          message.text = inputText;
-          message.senderId = 'current_user_id'; // In a real app, you'd have the current user ID
-          message.chatSessionId = chatId;
-          message.status = 'sent';
-          message.timestamp = Date.now();
-        });
-      });
+      // 通过 WebSocket 发送消息到后端
+      sendMessage(chatId, inputText);
 
       // Clear the input
       setInputText('');
-
-      // The message will appear in the list due to the subscription
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -209,6 +201,36 @@ const ChatDetailScreen = () => {
   const handleLongPress = () => {
     if (inputText.trim() === '') return;
     setShowTranslationModal(true);
+  };
+
+  // Save message from WebSocket to local database
+  const saveMessageToLocal = async (data: any) => {
+    if (!database) return;
+    
+    try {
+      const localMessages = await database.collections
+        .get<Message>('messages')
+        .query(Q.where('id', data.id))
+        .fetch();
+
+      if (localMessages.length > 0) {
+        // Message already exists, skip
+        return;
+      }
+
+      await database.write(async () => {
+        await database.collections.get<Message>('messages').create((message: any) => {
+          message.id = data.id;
+          message.text = data.text;
+          message.senderId = data.senderId;
+          message.chatSessionId = data.chatSessionId;
+          message.status = data.status || 'sent';
+          message.timestamp = data.createdAt || Date.now();
+        });
+      });
+    } catch (error) {
+      console.error('Save message to local failed:', error);
+    }
   };
 
   const handleCloseTranslationModal = () => {

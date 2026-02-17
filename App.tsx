@@ -4,14 +4,15 @@
  */
 
 import { StatusBar, StyleSheet, View, Text } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import MainTabNavigator from './src/navigation/MainTabNavigator';
-import { database } from './src/database';
 import { DatabaseProvider } from '@nozbe/watermelondb/react';
 import { useEffect, useState } from 'react';
 import { initializeDatabase } from './src/database/initialize';
+import { database } from './src/database';
+import { AuthProvider } from './src/contexts/AuthContext';
+import { WebSocketProvider } from './src/contexts/WebSocketContext';
+import RootNavigator from './src/navigation/RootNavigator';
 
 function App() {
   const [dbReady, setDbReady] = useState(false);
@@ -22,7 +23,7 @@ function App() {
       await initializeDatabase();
       setDbReady(true);
     };
-    
+
     initDb();
   }, []);
 
@@ -42,12 +43,11 @@ function App() {
     <DatabaseProvider database={database}>
       <SafeAreaProvider>
         <KeyboardProvider>
-          <NavigationContainer>
-            <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-            <View style={styles.container}>
-              <MainTabNavigator />
-            </View>
-          </NavigationContainer>
+          <AuthProvider>
+            <WebSocketProvider>
+              <RootNavigator />
+            </WebSocketProvider>
+          </AuthProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </DatabaseProvider>

@@ -14,7 +14,13 @@ export default class User extends Model {
   name!: string;
 
   @field('email')
-  email?: string;
+  email!: string;
+
+  @field('password_hash')
+  passwordHash?: string;
+
+  @field('google_id')
+  googleId?: string;
 
   @field('avatar_url')
   avatarUrl?: string;
@@ -22,9 +28,11 @@ export default class User extends Model {
   @field('is_online')
   isOnline?: boolean;
 
+  @readonly
   @date('created_at')
   createdAt!: number;
 
+  @readonly
   @date('updated_at')
   updatedAt!: number;
 }
