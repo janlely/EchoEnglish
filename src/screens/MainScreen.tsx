@@ -97,11 +97,11 @@ const MainScreen = () => {
         fontSize: 18,
         fontWeight: 'bold',
       },
-      headerLeft: () => (
-        <TouchableOpacity style={{ paddingLeft: 16 }}>
-          <Text style={{ fontSize: 20 }}>☰</Text>
-        </TouchableOpacity>
-      ),
+      // headerLeft: () => (
+      //   <TouchableOpacity style={{ paddingLeft: 16 }}>
+      //     <Text style={{ fontSize: 20 }}>☰</Text>
+      //   </TouchableOpacity>
+      // ),
       headerRight: () => (
         <TouchableOpacity style={{ paddingRight: 16 }}>
           <Text style={{ fontSize: 20 }}>+</Text>

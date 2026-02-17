@@ -1,6 +1,6 @@
 import { Database } from '@nozbe/watermelondb';
 import { adapter } from './adapters';
-import { User, ChatSession, Message, ChatParticipant, UserSetting } from './models';
+import { User, ChatSession, Message, ChatParticipant, UserSetting, AuthToken } from './models';
 
 // Create the database instance
 export const database = new Database({
@@ -11,8 +11,9 @@ export const database = new Database({
     Message,
     ChatParticipant,
     UserSetting,
+    AuthToken,
   ],
 });
 
 // Export types for convenience
-export type { User, ChatSession, Message, ChatParticipant, UserSetting };
+export type { User, ChatSession, Message, ChatParticipant, UserSetting, AuthToken };

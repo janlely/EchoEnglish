@@ -10,7 +10,6 @@
     "test": "jest"
   },
   "dependencies": {
-    "@getbrevo/brevo": "^3.0.1",
     "@hcaptcha/react-native-hcaptcha": "^2.1.0",
     "@nozbe/watermelondb": "^0.28.0",
     "@react-native/new-app-screen": "0.83.0",

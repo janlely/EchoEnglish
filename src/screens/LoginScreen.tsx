@@ -12,12 +12,30 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
+import { ApiService } from '../services/ApiService';
 
 const LoginScreen = ({ navigation }: any) => {
-  const { login } = useAuth();
+  const { user, login, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // 监听用户状态变化
+  useEffect(() => {
+    console.log('[LoginScreen] useEffect - user:', user ? { id: user.id, email: user.email } : null, 'authLoading:', authLoading);
+    if (user && !authLoading) {
+      console.log('[LoginScreen] User is logged in, replacing to Main');
+      navigation.replace('Main');
+    }
+  }, [user, authLoading]);
+
+  // 组件加载时打印状态
+  useEffect(() => {
+    console.log('[LoginScreen] Component mounted, initial user:', user ? { id: user.id } : null);
+    return () => {
+      console.log('[LoginScreen] Component will unmount');
+    };
+  }, []);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -25,28 +43,17 @@ const LoginScreen = ({ navigation }: any) => {
       return;
     }
 
-    setLoading(true);
+    setLoginLoading(true);
     try {
-      // 直接调用 API 以获取 isEmailVerified 状态
-      const response = await fetch('http://192.168.1.4:3000/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-        }),
-      });
+      // 调用登录接口
+      const data: any = await ApiService.login(email.trim(), password);
 
-      const data: any = await response.json();
-
-      if (response.ok && data.success) {
-        // 登录成功，保存 token
-        await login(email.trim(), password);
-        // 邮箱已验证，自动进入主页面（由 AuthContext 控制）
-      } else if (response.status === 403 && data.requiresEmailVerification) {
-        // 邮箱未验证，跳转到验证页面
+      // 登录成功，保存 token
+      await login(email.trim(), password);
+      // 登录成功后会自动进入主页面（由 AuthContext 的 user 状态控制）
+    } catch (error: any) {
+      // 检查是否是邮箱未验证错误
+      if (error.message === 'Email not verified') {
         Alert.alert(
           '邮箱未验证',
           '请先验证您的邮箱，验证码已发送到您的邮箱。',
@@ -54,23 +61,21 @@ const LoginScreen = ({ navigation }: any) => {
             {
               text: '去验证',
               onPress: () => {
-                navigation.navigate('VerifyEmail', { email: data.email || email.trim() });
+                navigation.navigate('VerifyEmail', { email: email.trim() });
               },
             },
           ]
         );
       } else {
-        Alert.alert('登录失败', data.error || '请稍后重试');
+        Alert.alert('登录失败', error.message || '请稍后重试');
       }
-    } catch (error: any) {
-      Alert.alert('登录失败', error.message || '请稍后重试');
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    setLoading(true);
+    setLoginLoading(true);
     try {
       // TODO: 实现 Google Sign-In
       // 这是示例代码，需要配置 @react-native-google-signin/google-signin
@@ -80,7 +85,7 @@ const LoginScreen = ({ navigation }: any) => {
     } catch (error: any) {
       Alert.alert('Google 登录失败', error.message || '请稍后重试');
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
@@ -116,7 +121,7 @@ const LoginScreen = ({ navigation }: any) => {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!loading}
+                editable={!loginLoading}
               />
             </View>
 
@@ -129,17 +134,17 @@ const LoginScreen = ({ navigation }: any) => {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
-                editable={!loading}
+                editable={!loginLoading}
               />
             </View>
 
             <TouchableOpacity
-              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+              style={[styles.loginButton, loginLoading && styles.loginButtonDisabled]}
               onPress={handleLogin}
-              disabled={loading}
+              disabled={loginLoading}
             >
               <Text style={styles.loginButtonText}>
-                {loading ? '登录中...' : '登录'}
+                {loginLoading ? '登录中...' : '登录'}
               </Text>
             </TouchableOpacity>
 
@@ -152,9 +157,9 @@ const LoginScreen = ({ navigation }: any) => {
 
             {/* Google 登录按钮 */}
             <TouchableOpacity
-              style={[styles.googleButton, loading && styles.googleButtonDisabled]}
+              style={[styles.googleButton, loginLoading && styles.googleButtonDisabled]}
               onPress={handleGoogleLogin}
-              disabled={loading}
+              disabled={loginLoading}
             >
               <Text style={styles.googleButtonText}>G</Text>
               <Text style={styles.googleButtonText}>使用 Google 账号登录</Text>

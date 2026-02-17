@@ -1,11 +1,12 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 2,
+  version: 4,
   tables: [
     tableSchema({
       name: 'users',
       columns: [
+        { name: 'user_id', type: 'string', isOptional: true }, // 后端用户 ID
         { name: 'name', type: 'string' },
         { name: 'email', type: 'string', isOptional: true },
         { name: 'password_hash', type: 'string', isOptional: true },

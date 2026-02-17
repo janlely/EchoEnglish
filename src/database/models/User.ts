@@ -10,6 +10,9 @@ export default class User extends Model {
     chat_participants: { type: 'has_many', foreignKey: 'user_id' },
   };
 
+  @field('user_id')
+  userId?: string;
+
   @field('name')
   name!: string;
 

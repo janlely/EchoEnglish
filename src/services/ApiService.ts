@@ -14,33 +14,35 @@ class ApiServiceClass {
       if (!collection) {
         return { accessToken: null, refreshToken: null };
       }
-      
+
       const tokens = await collection.query().fetch();
 
       if (tokens.length === 0) {
+        console.log('[ApiService] getTokens: No tokens found');
         return { accessToken: null, refreshToken: null };
       }
 
       const token = tokens[0];
+      console.log('[ApiService] getTokens: Found tokens, expiresAt:', new Date(token.expiresAt).toISOString());
       return {
         accessToken: token.accessToken,
         refreshToken: token.refreshToken,
       };
     } catch (error) {
-      console.error('Get tokens failed:', error);
+      console.error('[ApiService] Get tokens failed:', error);
       return { accessToken: null, refreshToken: null };
     }
   }
 
-  // 保存 Token
-  private async saveTokens(accessToken: string, refreshToken: string) {
+  // 保存 Token（public 方法，供 AuthContext 调用）
+  async saveTokens(accessToken: string, refreshToken: string) {
     try {
       const collection = database.collections.get<AuthToken>('auth_tokens');
       if (!collection) {
-        console.warn('auth_tokens collection not available, skipping token save');
+        console.warn('[ApiService] saveTokens: auth_tokens collection not available');
         return;
       }
-      
+
       await database.write(async () => {
         const existingTokens = await collection.query().fetch();
 
@@ -60,8 +62,9 @@ class ApiServiceClass {
           });
         }
       });
+      console.log('[ApiService] saveTokens: Tokens saved successfully');
     } catch (error) {
-      console.error('Save tokens failed:', error);
+      console.error('[ApiService] Save tokens failed:', error);
     }
   }
 
@@ -72,13 +75,14 @@ class ApiServiceClass {
       if (!collection) {
         return;
       }
-      
+
       await database.write(async () => {
         const tokens = await collection.query().fetch();
         await Promise.all(tokens.map(t => t.destroyPermanently()));
       });
+      console.log('[ApiService] clearTokens: Tokens cleared');
     } catch (error) {
-      console.error('Clear tokens failed:', error);
+      console.error('[ApiService] Clear tokens failed:', error);
     }
   }
 
@@ -88,10 +92,11 @@ class ApiServiceClass {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${API_CONFIG.BASE_URL}${endpoint}`;
-    
+
     // 获取 Token
-    const { accessToken } = await this.getTokens();
-    
+    const { accessToken, refreshToken } = await this.getTokens();
+    console.log('[ApiService] request:', endpoint, 'accessToken:', accessToken ? 'exists' : 'null', 'refreshToken:', refreshToken ? 'exists' : 'null');
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
@@ -162,6 +167,7 @@ class ApiServiceClass {
 
   // 认证 API
   async login(email: string, password: string) {
+    console.log('[ApiService] login: Called with email:', email);
     return this.request('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
@@ -169,6 +175,7 @@ class ApiServiceClass {
   }
 
   async register(name: string, email: string, password: string) {
+    console.log('[ApiService] register: Called with email:', email);
     return this.request('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
@@ -176,6 +183,7 @@ class ApiServiceClass {
   }
 
   async logout() {
+    console.log('[ApiService] logout: Called');
     try {
       await this.request('/api/auth/logout', { method: 'POST' });
     } finally {
@@ -184,6 +192,7 @@ class ApiServiceClass {
   }
 
   async getCurrentUser() {
+    console.log('[ApiService] getCurrentUser: Called');
     return this.request('/api/auth/me');
   }
 

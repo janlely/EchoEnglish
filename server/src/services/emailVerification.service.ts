@@ -97,13 +97,17 @@ class EmailVerificationService {
         },
       });
 
-      // 更新用户状态
-      await prisma.user.update({
+      // 检查用户是否存在
+      const user = await prisma.user.findUnique({
         where: { id: verification.userId },
-        data: {
-          // 可以添加 isEmailVerified 字段
-        },
       });
+
+      if (user) {
+        // 用户存在，可以在这里更新用户状态（如果添加了 isEmailVerified 字段）
+        logger.info(`Email verified for user: ${verification.userId}`);
+      } else {
+        logger.warn(`User not found for verification: ${verification.userId}, email: ${email}`);
+      }
 
       logger.info(`Email verified: ${email}`);
 
@@ -216,7 +220,7 @@ class EmailVerificationService {
       message.subject = subject;
       message.htmlContent = htmlContent;
       message.sender = {
-        email: 'noreply@echoenglish.com',
+        email: 'Eric.Janlely@gmail.com',
         name: 'EchoEnglish',
       };
       message.to = [{ email }];
