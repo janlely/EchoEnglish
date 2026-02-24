@@ -17,10 +17,19 @@ export default class Message extends Model {
   senderId!: string;
 
   @field('chat_session_id')
-  chatSessionId!: string;
+  chatSessionId!: string; // 保留字段用于兼容
+
+  @field('chat_type')
+  chatType!: string; // 'direct' | 'group'
+
+  @field('target_id')
+  targetId!: string; // 私聊：对方用户 ID，群聊：群 ID
 
   @field('status')
-  status!: string; // 'sent', 'delivered', 'read'
+  status!: string; // 'sending', 'sent', 'delivered', 'read'
+
+  @field('msg_id')
+  msgId?: string; // 前端生成的消息 ID，用于去重
 
   @date('timestamp')
   timestamp!: number;

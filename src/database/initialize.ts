@@ -1,13 +1,18 @@
 import { database } from './index';
 
-// Initialize the database - no sample data, starts empty
-// Real data will be loaded from the server via API
-export const initializeDatabase = async () => {
+/**
+ * Initialize database with schema
+ */
+export const initializeDatabase = async (): Promise<void> => {
   try {
-    // Database starts empty - no sample data needed
-    console.log('Database initialized (empty state)');
-    return;
+    const db = database;
+    if (!db) {
+      console.log('[Database] Database not initialized yet');
+      return;
+    }
+
+    console.log('[Database] Database initialized');
   } catch (error) {
-    console.error('Error initializing database:', error);
+    console.error('[Database] Error initializing database:', error);
   }
 };

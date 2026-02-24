@@ -75,32 +75,9 @@ async function main() {
           { userId: user2.id, role: 'member' },
         ],
       },
-      messages: {
-        create: [
-          {
-            text: 'Hello! How are you?',
-            senderId: user1.id,
-            type: 'text',
-            status: 'read',
-          },
-          {
-            text: "I'm doing great! Thanks for asking.",
-            senderId: user2.id,
-            type: 'text',
-            status: 'read',
-          },
-          {
-            text: 'Want to grab lunch later?',
-            senderId: user1.id,
-            type: 'text',
-            status: 'delivered',
-          },
-        ],
-      },
     },
     include: {
       participants: true,
-      messages: true,
     },
   });
 

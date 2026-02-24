@@ -4,14 +4,45 @@ import { database } from '../database';
 import { Q } from '@nozbe/watermelondb';
 import AuthToken from '../database/models/AuthToken';
 
-type EventHandler = (data: any) => void;
+// Simple cross-platform event emitter
+type AuthEventHandler = () => void;
+
+class SimpleEventEmitter {
+  private handlers: Map<string, Set<AuthEventHandler>> = new Map();
+
+  on(event: string, handler: AuthEventHandler) {
+    if (!this.handlers.has(event)) {
+      this.handlers.set(event, new Set());
+    }
+    this.handlers.get(event)!.add(handler);
+  }
+
+  off(event: string, handler: AuthEventHandler) {
+    this.handlers.get(event)?.delete(handler);
+  }
+
+  emit(event: string) {
+    this.handlers.get(event)?.forEach(handler => handler());
+  }
+}
+
+// Create event emitter for auth events
+export const authEventEmitter = new SimpleEventEmitter();
+
+type WebSocketEventHandler = (data: any) => void;
 
 class WebSocketServiceClass {
   private socket: Socket | null = null;
-  private eventHandlers = new Map<string, Set<EventHandler>>();
+  private eventHandlers = new Map<string, Set<WebSocketEventHandler>>();
 
   // 连接 WebSocket
   async connect() {
+    // 如果已经连接，直接返回
+    if (this.socket?.connected) {
+      console.log('✅ WebSocket already connected');
+      return Promise.resolve();
+    }
+    
     // 从 WatermelonDB 获取 Token
     let token: string | null = null;
     try {
@@ -23,14 +54,19 @@ class WebSocketServiceClass {
     } catch (error) {
       // Token 获取失败，继续使用 null token
     }
-    
+
     // 如果没有 Token，不尝试连接
     if (!token) {
       console.log('⚠️ WebSocket skipped: No token available');
       return Promise.resolve();
     }
-    
+
     return new Promise<void>((resolve, reject) => {
+      // 如果已有 socket，先断开
+      if (this.socket) {
+        this.socket.disconnect();
+      }
+      
       this.socket = io(WS_CONFIG.URL, {
         path: WS_CONFIG.PATH,
         auth: { token },
@@ -38,7 +74,7 @@ class WebSocketServiceClass {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10, // 增加重连次数
       });
 
       this.socket.on('connect', () => {
@@ -47,8 +83,25 @@ class WebSocketServiceClass {
       });
 
       this.socket.on('connect_error', (error: any) => {
-        console.error('❌ WebSocket connection error:', error);
+        console.error('❌ WebSocket connection error:', error.message);
+        
+        // 如果是认证失败，触发 logout 事件
+        if (error.message.includes('Authentication') || error.message.includes('auth')) {
+          console.error('🔑 WebSocket authentication failed, triggering logout...');
+          // 触发全局 logout 事件
+          authEventEmitter.emit('logout');
+        }
+        
         reject(error);
+      });
+      
+      this.socket.on('disconnect', (reason: string) => {
+        console.log(`⚠️ WebSocket disconnected: ${reason}`);
+        // 如果是服务器断开，尝试重连
+        if (reason === 'io server disconnect') {
+          console.log('🔄 Server disconnected, attempting to reconnect...');
+          this.socket?.connect();
+        }
       });
 
       this.setupEventListeners();
@@ -59,6 +112,7 @@ class WebSocketServiceClass {
     if (!this.socket) return;
 
     this.socket.on('receive_message', (data: any) => this.emit('receive_message', data));
+    this.socket.on('message_sent', (data: any) => this.emit('message_sent', data));
     this.socket.on('user_status_changed', (data: any) => this.emit('user_status_changed', data));
     this.socket.on('user_typing', (data: any) => this.emit('user_typing', data));
     this.socket.on('user_stopped_typing', (data: any) => this.emit('user_stopped_typing', data));
@@ -68,8 +122,23 @@ class WebSocketServiceClass {
     this.socket.on('disconnect', () => console.log('⚠️ WebSocket disconnected'));
   }
 
-  sendMessage(chatId: string, text: string, type = 'text') {
-    this.socket?.emit('send_message', { chatSessionId: chatId, text, type });
+  sendMessage(targetId: string, text: string, type = 'text', msgId?: string, chatType: 'direct' | 'group' = 'direct') {
+    console.log('[WebSocket] sendMessage called:', { targetId, text, type, msgId, chatType });
+    console.log('[WebSocket] socket connected:', this.socket?.connected);
+    console.log('[WebSocket] socket exists:', !!this.socket);
+
+    if (!this.socket) {
+      console.error('[WebSocket] socket is null, cannot send message');
+      return;
+    }
+
+    if (!this.socket.connected) {
+      console.error('[WebSocket] socket not connected, cannot send message');
+      return;
+    }
+
+    this.socket.emit('send_message', { targetId, text, type, msgId, chatType });
+    console.log('[WebSocket] Message emitted successfully');
   }
 
   joinChat(chatId: string) {
@@ -92,14 +161,14 @@ class WebSocketServiceClass {
     this.socket?.emit('typing_stop', { chatSessionId: chatId });
   }
 
-  on(event: string, handler: EventHandler) {
+  on(event: string, handler: WebSocketEventHandler) {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, new Set());
     }
     this.eventHandlers.get(event)!.add(handler);
   }
 
-  off(event: string, handler: EventHandler) {
+  off(event: string, handler: WebSocketEventHandler) {
     this.eventHandlers.get(event)?.delete(handler);
   }
 

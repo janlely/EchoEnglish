@@ -8,7 +8,7 @@ class ApiServiceClass {
   private refreshSubscribers: Array<(token: string) => void> = [];
 
   // 获取 Token
-  private async getTokens(): Promise<{ accessToken: string | null; refreshToken: string | null }> {
+  async getTokens(): Promise<{ accessToken: string | null; refreshToken: string | null }> {
     try {
       const collection = database.collections.get<AuthToken>('auth_tokens');
       if (!collection) {
@@ -69,7 +69,7 @@ class ApiServiceClass {
   }
 
   // 清除 Token
-  private async clearTokens() {
+  async clearTokens() {
     try {
       const collection = database.collections.get<AuthToken>('auth_tokens');
       if (!collection) {
@@ -220,3 +220,9 @@ class ApiServiceClass {
 }
 
 export const ApiService = new ApiServiceClass();
+
+// Helper function to get auth token
+export const getAuthToken = async (): Promise<string | null> => {
+  const tokens = await ApiService.getTokens();
+  return tokens.accessToken;
+};

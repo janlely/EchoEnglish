@@ -54,10 +54,6 @@ class ChatService {
               },
             },
           },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
         },
       });
 
@@ -105,10 +101,6 @@ class ChatService {
                 },
               },
             },
-          },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
           },
         },
         orderBy: { [sortBy]: sortOrder },
@@ -161,10 +153,6 @@ class ChatService {
                 },
               },
             },
-          },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 50,
           },
         },
       });
@@ -308,10 +296,6 @@ class ChatService {
               },
             },
           },
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
         },
       },
     });

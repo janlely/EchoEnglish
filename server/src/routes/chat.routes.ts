@@ -53,4 +53,9 @@ router.put('/messages/:messageId', validateRequest(updateMessageSchema), message
 router.delete('/messages/:messageId', messageController.deleteMessage);
 router.post('/:chatSessionId/messages/read', messageController.markMessagesAsRead);
 
+// Message sync routes
+router.get('/sessions/sync', messageController.syncSessions);
+router.get('/messages/sync', messageController.syncMessages);
+router.post('/messages/ack', messageController.ackMessages);
+
 export default router;

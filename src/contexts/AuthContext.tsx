@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { ApiService } from '../services/ApiService';
+import { initDatabase, getDatabase } from '../database';
 import User from '../database/models/User';
 import { Q } from '@nozbe/watermelondb';
+import { authEventEmitter } from '../services/WebSocketService';
 
 interface AuthUser {
   id: string;
@@ -27,9 +28,22 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const database = useDatabase();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // 监听 logout 事件（WebSocket 认证失败时触发）
+  useEffect(() => {
+    const handleLogout = () => {
+      console.log('🔑 Received logout event from WebSocket');
+      setUser(null);
+      ApiService.clearTokens();
+    };
+
+    authEventEmitter.on('logout', handleLogout);
+    return () => {
+      authEventEmitter.off('logout', handleLogout);
+    };
+  }, []);
 
   // 监听 user 状态变化
   useEffect(() => {
@@ -43,12 +57,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const autoLogin = async () => {
-    console.log('[AuthContext] autoLogin: Starting...');
     try {
       const data: any = await ApiService.getCurrentUser();
       const userData = data.data.user;
 
       console.log('[AuthContext] autoLogin: Got user data from API:', userData.id);
+
+      // Initialize user-specific database
+      initDatabase(userData.id);
+
       setUser({
         id: userData.id,
         name: userData.name,
@@ -72,20 +89,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const syncUserToLocal = async (userData: any) => {
     try {
-      if (!database) {
+      const db = getDatabase();
+      if (!db) {
         console.log('[AuthContext] syncUserToLocal: database not available');
         return;
       }
 
-      const collection = database.collections.get<User>('users');
+      const collection = db.collections.get('users');
       
       // 使用 userId 字段查找现有用户（后端用户 ID）
       const existingUser = await collection
         .query(Q.where('user_id', userData.id))
         .fetch()
-        .then((users: User[]) => users[0] || null);
+        .then((users: any[]) => users[0] || null);
 
-      await database.write(async () => {
+      await db.write(async () => {
         if (existingUser) {
           // 更新现有用户
           await existingUser.update((u: any) => {
@@ -117,6 +135,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const data: any = await ApiService.login(email, password);
 
     console.log('[AuthContext] login: Setting user from login response');
+    
+    // Initialize user-specific database
+    initDatabase(data.data.user.id);
+    
     setUser({
       id: data.data.user.id,
       name: data.data.user.name,
@@ -138,6 +160,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('[AuthContext] register: Called with email:', email);
     const data: any = await ApiService.register(name, email, password);
 
+    // Initialize user-specific database
+    initDatabase(data.data.user.id);
+    
     setUser({
       id: data.data.user.id,
       name: data.data.user.name,
@@ -147,7 +172,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     // 保存 token
     if (data.data.accessToken && data.data.refreshToken) {
-      console.log('[AuthContext] register: Saving tokens');
       await ApiService.saveTokens(data.data.accessToken, data.data.refreshToken);
     }
 

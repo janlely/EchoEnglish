@@ -16,9 +16,5 @@ export const HCaptchaConfig = {
     : '你的生产环境-site-key',  // 生产环境
 };
 
-// API 配置
-export const APIConfig = {
-  BASE_URL: __DEV__
-    ? 'http://192.168.1.4:3000'
-    : 'https://your-api-domain.com',
-};
+// 注意：API 配置和 WebSocket 配置已迁移到 constants.ts
+// 请使用 import { API_CONFIG, WS_CONFIG } from './constants';

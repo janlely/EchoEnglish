@@ -3,6 +3,7 @@ import authRoutes from './auth.routes';
 import chatRoutes from './chat.routes';
 import notificationRoutes from './notification.routes';
 import emailVerificationRoutes from './emailVerification.routes';
+import friendRoutes from './friend.routes';
 
 const router = Router();
 
@@ -11,6 +12,7 @@ router.use('/auth', authRoutes);
 router.use('/chats', chatRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/email-verification', emailVerificationRoutes);
+router.use('/friends', friendRoutes);
 
 // Health check
 router.get('/health', (_req, res) => {

@@ -26,12 +26,16 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   lastSeenAt    DateTime?
-  
+
   messages      Message[]
   sessions      ChatParticipant[]
   settings      UserSetting?
   notifications Notification[]
-  
+  sentFriendRequests     FriendRequest[] @relation("senderRequests")
+  receivedFriendRequests FriendRequest[] @relation("receiverRequests")
+  friendships1   Friendship[] @relation("user1")
+  friendships2   Friendship[] @relation("user2")
+
   @@index([email])
   @@index([googleId])
 }
@@ -61,10 +65,9 @@ model ChatSession {
   avatarUrl   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   participants ChatParticipant[]
-  messages     Message[]
-  
+
   @@index([type])
 }
 
@@ -88,19 +91,21 @@ model ChatParticipant {
 // Message model
 model Message {
   id            String   @id @default(cuid())
+  msgId         String?  @unique // 前端生成的消息 ID，用于去重
+  chatType      String   @default("direct") // "direct" | "group"
+  targetId      String   @default("") // 私聊：对方用户 ID，群聊：群 ID
   text          String
   type          String   @default("text") // text, image, file
-  status        String   @default("sent") // sent, delivered, read
+  status        String   @default("sent") // sending, sent, delivered, read
   senderId      String
-  chatSessionId String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  
+
   sender        User       @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  chatSession   ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
-  
+
   @@index([senderId])
-  @@index([chatSessionId])
+  @@index([targetId])
+  @@index([chatType])
   @@index([createdAt])
 }
 
@@ -131,7 +136,40 @@ model EmailVerification {
   expiresAt DateTime
   isVerified Boolean @default(false)
   createdAt DateTime @default(now())
-  
+
   @@index([email])
   @@index([code])
+}
+
+// Friend Request model
+model FriendRequest {
+  id        String   @id @default(cuid())
+  senderId  String
+  receiverId String
+  message   String?
+  status    String   @default("pending") // pending, accepted, rejected
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sender    User     @relation("senderRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver  User     @relation("receiverRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+}
+
+// Friendship model
+model Friendship {
+  id        String   @id @default(cuid())
+  userId1   String
+  userId2   String
+  createdAt DateTime @default(now())
+
+  user1     User     @relation("user1", fields: [userId1], references: [id], onDelete: Cascade)
+  user2     User     @relation("user2", fields: [userId2], references: [id], onDelete: Cascade)
+
+  @@unique([userId1, userId2])
+  @@index([userId1])
+  @@index([userId2])
 }

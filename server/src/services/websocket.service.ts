@@ -7,6 +7,7 @@ import { TokenPayload } from '../types';
 import chatService from './chat.service';
 import messageService from './message.service';
 import notificationService from './notification.service';
+import prisma from '../config/database';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -33,23 +34,27 @@ class WebSocketService {
     this.io.use(async (socket: AuthSocket, next) => {
       try {
         const token = socket.handshake.auth.token;
+        logger.info(`[WebSocket] Auth attempt with token: ${token ? token.substring(0, 20) + '...' : 'none'}`);
 
         if (!token) {
+          logger.warn('[WebSocket] No token provided');
           return next(new Error('Authentication required'));
         }
 
         const decoded = jwt.verify(token, config.jwt.secret) as TokenPayload;
 
         if (decoded.type !== 'access') {
+          logger.warn('[WebSocket] Invalid token type');
           return next(new Error('Invalid token type'));
         }
 
         socket.userId = decoded.userId;
         socket.email = decoded.email;
+        logger.info(`[WebSocket] Auth success for user: ${decoded.email} (${decoded.userId})`);
 
         next();
       } catch (error: any) {
-        logger.error('WebSocket authentication error:', error);
+        logger.error('[WebSocket] Authentication error:', error.message);
         next(new Error('Authentication failed'));
       }
     });
@@ -97,23 +102,39 @@ class WebSocketService {
     });
 
     // Handle sending message
-    socket.on('send_message', async (data: { chatSessionId: string; text: string; type?: string }) => {
+    socket.on('send_message', async (data: { targetId: string; text: string; type?: string; msgId?: string; chatType?: 'direct' | 'group' }) => {
+      logger.info(`[WebSocket] Received send_message from ${userId}:`, JSON.stringify(data));
+
       try {
         const message = await messageService.sendMessage(
-          data.chatSessionId,
+          data.targetId,
           userId,
           data.text,
-          (data.type as any) || 'text'
+          (data.type as any) || 'text',
+          data.msgId,
+          data.chatType || 'direct'
         );
 
+        // 返回确认给发送者
+        const messageSentData = {
+          msgId: data.msgId,
+          messageId: message.id,
+          status: 'sent',
+        };
+        logger.info(`[WebSocket] Emitting message_sent to ${userId}:`, JSON.stringify(messageSentData));
+        socket.emit('message_sent', messageSentData);
+
         // Broadcast to chat room
-        this.io?.to(`chat:${data.chatSessionId}`).emit('receive_message', message);
+        const roomName = `chat:${data.targetId}`;
+        logger.info(`[WebSocket] Broadcasting to room ${roomName}`);
+        this.io?.to(roomName).emit('receive_message', message);
 
         // Send notification to other participants
-        await this.sendNotificationToOthers(data.chatSessionId, userId, message);
+        await this.sendNotificationToOthers(data.targetId, userId, message);
 
         logger.info(`Message sent via WebSocket: ${message.id}`);
       } catch (error: any) {
+        logger.error(`[WebSocket] Send message error:`, error.message);
         socket.emit('error', { message: error.message });
       }
     });
@@ -194,31 +215,101 @@ class WebSocketService {
     message: any
   ) {
     try {
-      const session = await chatService.getChatSession(chatSessionId, senderId);
+      // 判断是私聊还是群聊
+      // 私聊：chatSessionId 是 friendship.id（UUID 格式，包含 -）
+      // 群聊：chatSessionId 是 ChatSession.id（cuid 格式，不包含 -）
+      const isPrivateChat = chatSessionId.includes('-');
 
-      for (const participant of session.participants) {
-        if (participant.id !== senderId) {
-          await notificationService.sendMessageNotification(
-            participant.id,
-            session.name || 'Unknown',
-            message.text,
-            chatSessionId
-          );
+      // 私聊不发送通知，因为双方是好友，可以直接在消息页面看到
+      // 群聊才需要发送通知
+      if (!isPrivateChat) {
+        const session = await chatService.getChatSession(chatSessionId, senderId);
 
-          // Send real-time notification
-          this.io?.to(`user:${participant.id}`).emit('new_notification', {
-            type: 'message',
-            title: '新消息',
-            message: `${session.name || 'Unknown'}: ${message.text.substring(0, 50)}`,
-            data: {
-              chatSessionId,
-              messageId: message.id,
-            },
-          });
+        for (const participant of session.participants) {
+          if (participant.userId !== senderId) {
+            await notificationService.sendMessageNotification(
+              participant.userId,
+              session.name || 'Unknown',
+              message.text,
+              chatSessionId
+            );
+
+            // Send real-time notification
+            this.io?.to(`user:${participant.userId}`).emit('new_notification', {
+              type: 'message',
+              title: '新消息',
+              message: `${session.name || 'Unknown'}: ${message.text.substring(0, 50)}`,
+              data: {
+                chatSessionId,
+                messageId: message.id,
+              },
+            });
+          }
         }
       }
     } catch (error: any) {
       logger.error('Send notification error:', error);
+    }
+  }
+
+  /**
+   * Push message to online receivers
+   * 判断接收者是否在线，在线则实时推送
+   * 注：当前版本暂不使用，消息通过 broadcast 发送到 chat room
+   */
+  private async _pushToOnlineReceivers(
+    chatSessionId: string,
+    senderId: string,
+    message: any
+  ) {
+    try {
+      // 判断是私聊还是群聊
+      const isPrivateChat = chatSessionId.includes('-');
+
+      if (isPrivateChat) {
+        // 私聊：chatSessionId 是 friendship.id
+        // 需要查找对方用户 ID
+        const friendship = await prisma.friendship.findUnique({
+          where: { id: chatSessionId },
+        });
+
+        if (friendship) {
+          const receiverId = friendship.userId1 === senderId
+            ? friendship.userId2
+            : friendship.userId1;
+
+          // 检查接收者是否在线
+          if (this.userSockets.has(receiverId)) {
+            logger.info(`[WebSocket] Pushing message to online user: ${receiverId}`);
+            // 在线，推送消息
+            this.sendToUser(receiverId, 'receive_message', message);
+          } else {
+            logger.info(`[WebSocket] User ${receiverId} is offline, skip push`);
+          }
+        }
+      } else {
+        // 群聊：获取所有参与者
+        const session = await prisma.chatSession.findUnique({
+          where: { id: chatSessionId },
+          include: { participants: true },
+        });
+
+        if (session) {
+          for (const participant of session.participants) {
+            if (participant.userId !== senderId) {
+              // 检查是否在线
+              if (this.userSockets.has(participant.userId)) {
+                logger.info(`[WebSocket] Pushing message to online group member: ${participant.userId}`);
+                this.sendToUser(participant.userId, 'receive_message', message);
+              } else {
+                logger.info(`[WebSocket] Group member ${participant.userId} is offline, skip push`);
+              }
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      logger.error('Push to online receivers error:', error);
     }
   }
 

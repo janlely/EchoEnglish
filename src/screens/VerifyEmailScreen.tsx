@@ -13,7 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import Turnstile from '../components/Turnstile';
-import { TurnstileConfig, APIConfig } from '../config/appConfig';
+import { TurnstileConfig } from '../config/appConfig';
+import { API_CONFIG } from '../config/constants';
 
 interface VerifyEmailScreenProps {
   navigation: any;
@@ -31,13 +32,13 @@ const VerifyEmailScreen = ({ navigation, route }: VerifyEmailScreenProps) => {
   const [email, setEmail] = useState(route.params?.email || '');
   const [password, setPassword] = useState('');
   const isFromRegister = !!route.params?.email;
-  
+
   // Turnstile 相关状态
   const [showTurnstile, setShowTurnstile] = useState(false);
 
   // 使用配置文件中的 site key
   const siteKey = TurnstileConfig.siteKey;
-  const apiUrl = APIConfig.BASE_URL;
+  const apiUrl = API_CONFIG.BASE_URL;
 
   const handleVerify = async () => {
     if (!code.trim()) {

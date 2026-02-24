@@ -1,16 +1,19 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { WebSocketService } from '../services/WebSocketService';
 import { useAuth } from './AuthContext';
+import { ApiService } from '../services/ApiService';
+import { authEventEmitter } from '../services/WebSocketService';
 
 interface WebSocketContextType {
   isConnected: boolean;
-  sendMessage: (chatId: string, text: string) => void;
+  sendMessage: (targetId: string, text: string, type?: string, msgId?: string, chatType?: 'direct' | 'group') => void;
   joinChat: (chatId: string) => void;
   leaveChat: (chatId: string) => void;
   markRead: (chatId: string) => void;
   startTyping: (chatId: string) => void;
   stopTyping: (chatId: string) => void;
   onMessage: (handler: (data: any) => void) => () => void;
+  onMessageSent: (handler: (data: any) => void) => () => void;
   onUserStatus: (handler: (data: any) => void) => () => void;
   onTyping: (handler: (data: any) => void) => () => void;
 }
@@ -20,29 +23,78 @@ const WebSocketContext = createContext<WebSocketContextType | undefined>(undefin
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
+  const reconnectTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 连接 WebSocket
+  const connectWebSocket = React.useCallback(() => {
+    if (!isAuthenticated) return;
+
+    WebSocketService.connect()
+      .then(() => {
+        console.log('✅ WebSocket connected successfully');
+        setIsConnected(true);
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      })
+      .catch((error: any) => {
+        console.warn('⚠️ WebSocket connect failed:', error.message);
+        setIsConnected(false);
+        
+        // 如果是认证失败，清除 token 并触发 logout
+        if (error.message === 'Authentication failed' || error.message.includes('Authentication')) {
+          console.log('🔑 WebSocket authentication failed, clearing tokens...');
+          ApiService.clearTokens().then(() => {
+            console.log('🔑 Tokens cleared');
+            authEventEmitter.emit('logout');
+          });
+          return;
+        }
+        
+        // 其他错误，3 秒后重试
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, 3000);
+      });
+  }, [isAuthenticated]);
 
   // 只在用户登录后连接 WebSocket
   useEffect(() => {
     if (!isAuthenticated) {
       // 未登录时断开连接
+      console.log('🔌 Disconnecting WebSocket (not authenticated)');
       WebSocketService.disconnect();
       setIsConnected(false);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       return;
     }
 
     // 已登录时连接 WebSocket
-    WebSocketService.connect()
-      .then(() => setIsConnected(true))
-      .catch((error) => {
-        console.warn('WebSocket connect failed:', error.message);
-        // 不打印完整错误堆栈，避免干扰
-      });
+    console.log('🔌 Connecting WebSocket (authenticated)');
+    connectWebSocket();
+
+    // 定期检查连接状态
+    const checkInterval = setInterval(() => {
+      if (!WebSocketService.isConnected()) {
+        console.warn('⚠️ WebSocket disconnected, attempting to reconnect...');
+        connectWebSocket();
+      }
+    }, 10000); // 每 10 秒检查一次
 
     return () => {
+      console.log('🔌 Cleaning up WebSocket connection');
       WebSocketService.disconnect();
       setIsConnected(false);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      clearInterval(checkInterval);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, connectWebSocket]);
 
   return (
     <WebSocketContext.Provider
@@ -57,6 +109,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         onMessage: (handler) => {
           WebSocketService.on('receive_message', handler);
           return () => WebSocketService.off('receive_message', handler);
+        },
+        onMessageSent: (handler) => {
+          WebSocketService.on('message_sent', handler);
+          return () => WebSocketService.off('message_sent', handler);
         },
         onUserStatus: (handler) => {
           WebSocketService.on('user_status_changed', handler);

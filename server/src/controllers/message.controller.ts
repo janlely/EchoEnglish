@@ -128,6 +128,97 @@ class MessageController {
       next(error);
     }
   }
+
+  /**
+   * Sync messages - get messages after a specific msgId and mark them as read
+   */
+  async syncMessages(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id; // Current user ID
+      const { targetId, chatType } = req.query; // targetId is the OTHER user's ID
+
+      if (!targetId) {
+        res.status(400).json({
+          success: false,
+          error: 'targetId is required',
+        });
+        return;
+      }
+
+      // For direct chat: get messages FROM targetId TO userId
+      const result = await messageService.syncMessages(
+        userId, // Current user (message recipient)
+        targetId as string, // Other user (message sender)
+        (chatType as string) || 'direct',
+        50
+      );
+
+      logger.info(`Synced ${result.messages.length} messages for user ${userId}, from: ${targetId}`);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      logger.error('Sync messages controller error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Acknowledge and delete messages
+   */
+  async ackMessages(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id; // Current user ID
+      const { targetId, minMsgId } = req.body; // targetId is the OTHER user's ID
+
+      if (!targetId || !minMsgId) {
+        res.status(400).json({
+          success: false,
+          error: 'targetId and minMsgId are required',
+        });
+        return;
+      }
+
+      const result = await messageService.ackMessages(
+        userId, // Current user (message recipient)
+        targetId, // Other user (message sender)
+        minMsgId
+      );
+
+      logger.info(`Acked ${result.count} messages for user ${userId}, from: ${targetId}`);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      logger.error('Ack messages controller error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Sync session list with unread count
+   */
+  async syncSessions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+
+      const sessions = await messageService.getSessionList(userId);
+
+      logger.info(`Synced ${sessions.length} sessions for user ${userId}`);
+
+      res.status(200).json({
+        success: true,
+        data: { sessions },
+      });
+    } catch (error: any) {
+      logger.error('Sync sessions controller error:', error);
+      next(error);
+    }
+  }
 }
 
 export default new MessageController();

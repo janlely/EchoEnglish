@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 4,
+  version: 8,
   tables: [
     tableSchema({
       name: 'users',
@@ -20,14 +20,15 @@ export const schema = appSchema({
     tableSchema({
       name: 'chat_sessions',
       columns: [
+        { name: 'target_id', type: 'string' }, // 对方用户 ID 或群 ID
+        { name: 'chat_type', type: 'string' }, // 'direct' | 'group'
         { name: 'name', type: 'string' },
-        { name: 'type', type: 'string' }, // 'direct' or 'group'
-        { name: 'last_message_id', type: 'string', isOptional: true },
+        { name: 'avatar_url', type: 'string', isOptional: true },
+        { name: 'last_message_id', type: 'string', isOptional: true }, // 最新消息的 msgId（用于排序）
+        { name: 'last_message_text', type: 'string', isOptional: true },
+        { name: 'last_message_time', type: 'number', isOptional: true }, // 时间戳
         { name: 'unread_count', type: 'number', isOptional: true },
         { name: 'is_online', type: 'boolean', isOptional: true },
-        { name: 'is_archived', type: 'boolean', isOptional: true },
-        { name: 'is_muted', type: 'boolean', isOptional: true },
-        { name: 'avatar_url', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -37,8 +38,11 @@ export const schema = appSchema({
       columns: [
         { name: 'text', type: 'string' },
         { name: 'sender_id', type: 'string' },
-        { name: 'chat_session_id', type: 'string' },
-        { name: 'status', type: 'string' }, // 'sent', 'delivered', 'read'
+        { name: 'chat_session_id', type: 'string' }, // 保留用于兼容
+        { name: 'chat_type', type: 'string' }, // 'direct' | 'group'
+        { name: 'target_id', type: 'string' }, // 私聊：对方用户 ID，群聊：群 ID
+        { name: 'status', type: 'string' }, // 'sending', 'sent', 'delivered', 'read'
+        { name: 'msg_id', type: 'string', isOptional: true }, // 前端生成的消息 ID
         { name: 'timestamp', type: 'number' },
         { name: 'reply_to_message_id', type: 'string', isOptional: true },
         { name: 'media_url', type: 'string', isOptional: true },

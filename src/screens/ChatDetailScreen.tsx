@@ -8,6 +8,7 @@ import {
   FlatList,
   Platform,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,17 +21,30 @@ import Animated, {
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { Message } from '../database/models';
+import { Message, ChatSession } from '../database/models';
+import { getDatabase } from '../database';
+import { API_CONFIG } from '../config/constants';
+import { getAuthToken } from '../services/ApiService';
 import { ChatDetailScreenNavigationProp, ChatDetailScreenRouteProp } from '../types/navigation';
 import { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useWebSocket } from '../contexts/WebSocketContext';
 
+// 生成消息 ID（时间戳 + 随机数）
+const generateMsgId = () => {
+  const timestamp = Date.now().toString(36); // 36 进制时间戳
+  const random = Math.random().toString(36).substring(2, 8); // 6 位随机数
+  return `msg_${timestamp}_${random}`;
+  // 示例：msg_m4k7j2x8n3p9
+};
+
 interface MessageInterface {
   id: string;
+  msgId?: string;
   text: string;
   sender: 'me' | 'other';
   timestamp: string;
+  sending?: boolean;
 }
 
 const ChatDetailScreen = () => {
@@ -38,12 +52,22 @@ const ChatDetailScreen = () => {
   const route = useRoute<ChatDetailScreenRouteProp>();
   const parentNavigation = useNavigation();
   const tabNavigation = parentNavigation.getParent();
-  const { sendMessage, joinChat, leaveChat, onMessage } = useWebSocket();
+  const { sendMessage, joinChat, leaveChat, onMessage, onMessageSent } = useWebSocket();
 
-  const database = useDatabase();
-  // In a real app, you would get the chat ID from route params
+  // Get the current user's database instance
+  const database = getDatabase() || useDatabase();
   const chatId = route.params.chatId;
   const chatName = route.params.chatName;
+  const chatType = route.params.chatType || 'direct';
+
+  const [messages, setMessages] = useState<MessageInterface[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [showTranslationModal, setShowTranslationModal] = useState(false);
+  const [latestMsgId, setLatestMsgId] = useState<string | null>(null); // 最新已同步的 msgId
+
+  console.log('[ChatDetailScreen] route.params:', route.params);
+  console.log('[ChatDetailScreen] chatId:', chatId, 'chatType:', chatType);
 
   const scrollViewRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
@@ -109,36 +133,268 @@ const ChatDetailScreen = () => {
     };
   }, [navigation, chatName, tabNavigation]);
 
-  const [messages, setMessages] = useState<MessageInterface[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [showTranslationModal, setShowTranslationModal] = useState(false);
+  // Save message from WebSocket to local database
+  const saveMessageToLocal = React.useCallback(async (data: any) => {
+    if (!database) return;
+
+    try {
+      console.log('[ChatDetailScreen] saveMessageToLocal called with:', data);
+      
+      // 通过 msgId 查找（用于更新发送中的消息）
+      let localMessage = null;
+      if (data.msgId) {
+        const messagesByMsgId = await database.collections
+          .get<Message>('messages')
+          .query(Q.where('msg_id', Q.eq(data.msgId)))
+          .fetch();
+        localMessage = messagesByMsgId[0];
+        console.log('[ChatDetailScreen] Found message by msgId:', localMessage ? 'yes' : 'no');
+      }
+
+      if (localMessage) {
+        // 更新现有消息状态（sending -> sent）
+        await database.write(async () => {
+          await localMessage.update((msg: any) => {
+            msg.status = 'sent';
+          });
+        });
+        console.log('[ChatDetailScreen] Message status updated to sent');
+      } else {
+        // 创建新消息（接收到的消息）
+        await database.write(async () => {
+          await database.collections.get<Message>('messages').create((message: any) => {
+            message.msgId = data.msgId;
+            message.chatType = data.chatType || 'direct';
+            message.targetId = data.targetId || chatId;
+            message.text = data.text;
+            message.senderId = data.senderId;
+            message.chatSessionId = data.targetId || chatId;
+            message.status = data.status || 'sent';
+            message.timestamp = data.createdAt || Date.now();
+          });
+        });
+        console.log('[ChatDetailScreen] New message saved to local');
+      }
+    } catch (error) {
+      console.error('[ChatDetailScreen] Save message to local failed:', error);
+    }
+  }, [database, chatId]);
+
+  // Sync messages from server
+  const syncMessagesFromServer = React.useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        console.log('[ChatDetailScreen] No token, skip sync');
+        return;
+      }
+
+      const url = `${API_CONFIG.BASE_URL}/api/chats/messages/sync?targetId=${chatId}&chatType=direct`;
+
+      console.log('[ChatDetailScreen] Syncing messages from server:', url);
+
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data: any = await response.json();
+
+      if (response.ok && data.success) {
+        console.log('[ChatDetailScreen] Synced', data.data.messages.length, 'messages');
+        console.log('[ChatDetailScreen] Sync response:', JSON.stringify(data.data));
+
+        // Save messages to local database
+        if (data.data.messages.length > 0) {
+          await database.write(async () => {
+            for (const msg of data.data.messages) {
+              try {
+                await database.collections.get<Message>('messages').create((message: any) => {
+                  // message.id = msg.id;
+                  message.msgId = msg.msgId;
+                  message.chatType = msg.chatType || 'direct';
+                  message.targetId = msg.targetId;
+                  message.text = msg.text;
+                  message.senderId = msg.senderId;
+                  message.chatSessionId = msg.senderId;
+                  message.status = msg.status;
+                  message.timestamp = new Date(msg.createdAt).getTime();
+                });
+                console.log('[ChatDetailScreen] Saved message to local:', msg.msgId);
+              } catch (e) {
+                console.log('[ChatDetailScreen] Message already exists:', msg.id, msg.msgId, e);
+              }
+            }
+          });
+          console.log('[ChatDetailScreen] All messages saved to local');
+
+        } else {
+          console.log('[ChatDetailScreen] No messages to sync');
+        }
+        // Acknowledge messages
+        if (data.data.minMsgId) {
+          console.log('[ChatDetailScreen] Calling ackMessages with minMsgId:', data.data.minMsgId);
+          await ackMessages(data.data.minMsgId);
+        }
+      } else {
+        console.error('[ChatDetailScreen] Sync failed:', data.error);
+      }
+    } catch (error: any) {
+      console.error('[ChatDetailScreen] Sync error:', error.message);
+    }
+  }, [chatId, database]);
+
+  // Acknowledge messages
+  const ackMessages = React.useCallback(async (minMsgId: string) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        console.log('[ChatDetailScreen] No token, skip ack');
+        return;
+      }
+
+      console.log('[ChatDetailScreen] Acking messages, minMsgId:', minMsgId);
+
+      const response = await fetch(`${API_CONFIG.BASE_URL}/api/chats/messages/ack`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          targetId: chatId,
+          minMsgId,
+        }),
+      });
+
+      const data: any = await response.json();
+
+      if (response.ok && data.success) {
+        console.log('[ChatDetailScreen] Acked', data.data.count, 'messages');
+        
+        // Update local ChatSession unreadCount to 0
+        if (database) {
+          await database.write(async () => {
+            const sessions = await database.collections
+              .get<ChatSession>('chat_sessions')
+              .query(Q.where('target_id', Q.eq(chatId)))
+              .fetch();
+            
+            if (sessions.length > 0) {
+              await sessions[0].update((s: any) => {
+                s.unreadCount = 0;
+              });
+              console.log('[ChatDetailScreen] Updated session unreadCount to 0');
+            }
+          });
+        }
+      } else {
+        console.error('[ChatDetailScreen] Ack failed:', data.error);
+      }
+    } catch (error: any) {
+      console.error('[ChatDetailScreen] Ack error:', error.message);
+    }
+  }, [chatId, database]);
+
+  // Listen for message_sent event and update local message status
+  const handleMessageSent = React.useCallback((data: any) => {
+    console.log('[ChatDetailScreen] Received message_sent event:', JSON.stringify(data));
+    
+    // Find the local message by msgId and update status
+    const updateLocalMessage = async () => {
+      try {
+        if (!database || !data.msgId) {
+          console.log('[ChatDetailScreen] No database or msgId, skipping update');
+          return;
+        }
+        
+        // Find message by msgId
+        const messages = await database.collections
+          .get<Message>('messages')
+          .query(Q.where('msg_id', Q.eq(data.msgId)))
+          .fetch();
+        
+        console.log('[ChatDetailScreen] Found', messages.length, 'local messages with msgId:', data.msgId);
+        console.log('[ChatDetailScreen] Current status:', messages[0]?.status);
+        
+        if (messages.length > 0) {
+          await database.write(async () => {
+            await messages[0].update((m: any) => {
+              m.status = 'sent';
+              console.log('[ChatDetailScreen] Updating message status to: sent');
+            });
+            console.log('[ChatDetailScreen] Message update completed in database.write');
+            
+            // Update ChatSession's last_message_time and last_message_text
+            const sessions = await database.collections
+              .get<ChatSession>('chat_sessions')
+              .query(Q.where('target_id', Q.eq(chatId)))
+              .fetch();
+            
+            if (sessions.length > 0) {
+              await sessions[0].update((s: any) => {
+                s.last_message_time = Date.now();
+                s.last_message_text = messages[0].text;
+                s.last_message_id = data.msgId;
+                console.log('[ChatDetailScreen] Updated ChatSession last_message_time');
+              });
+            }
+          });
+          console.log('[ChatDetailScreen] Database write completed');
+          
+          // Manually update UI state to reflect the status change
+          setMessages(prevMessages => 
+            prevMessages.map(msg => 
+              msg.msgId === data.msgId 
+                ? { ...msg, sending: false }
+                : msg
+            )
+          );
+          console.log('[ChatDetailScreen] UI state updated');
+        } else {
+          console.log('[ChatDetailScreen] No local message found with msgId:', data.msgId);
+        }
+      } catch (error) {
+        console.error('[ChatDetailScreen] Update local message error:', error);
+      }
+    };
+    
+    updateLocalMessage();
+  }, [database, chatId]);
 
   useEffect(() => {
-    // Fetch messages from the database for this chat
+    // Fetch messages from the database for this chat using targetId
     const fetchMessages = async () => {
       try {
         if (!database) {
           console.error('Database is not available');
           return;
         }
-        
+
+        console.log('[ChatDetailScreen] Fetching messages for targetId:', chatId);
+
         const dbMessages = await database.collections
           .get<Message>('messages')
           .query(
-            Q.where('chat_session_id', chatId),
+            Q.where('chat_session_id', Q.eq(chatId)),
             Q.sortBy('timestamp', Q.desc)
           )
           .fetch();
 
+        console.log('[ChatDetailScreen] Fetched', dbMessages.length, 'messages');
+
         // Convert database records to the format expected by the UI
         const formattedMessages = dbMessages.map(msg => {
-          const sender: 'me' | 'other' = msg.senderId === 'current_user_id' ? 'me' : 'other'; // In a real app, you'd have the current user ID
+          const sender: 'me' | 'other' = msg.senderId === 'current_user_id' ? 'me' : 'other';
           return {
             id: msg.id,
+            msgId: msg.msgId,
             text: msg.text,
             sender,
             timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            sending: msg.status === 'sending',
           };
         });
 
@@ -153,84 +409,112 @@ const ChatDetailScreen = () => {
     if (database) {
       fetchMessages();
 
-      // Set up a subscription to listen for changes in the database
+      // Join chat room to receive real-time messages
+      console.log('[ChatDetailScreen] Joining chat room:', chatId);
+      joinChat(chatId);
+
+      // Set up a subscription to listen for changes in the database using chatSessionId
       const subscription = database.collections
         .get<Message>('messages')
         .query(
-          Q.where('chat_session_id', chatId),
+          Q.where('chat_session_id', Q.eq(chatId)),
           Q.sortBy('timestamp', Q.desc)
         )
         .observe()
         .subscribe((dbMessages) => {
+          console.log('[ChatDetailScreen] Database subscription triggered:', dbMessages.length, 'messages');
+
           const formattedMessages = dbMessages.map(msg => {
-            const sender: 'me' | 'other' = msg.senderId === 'current_user_id' ? 'me' : 'other'; // In a real app, you'd have the current user ID
+            const sender: 'me' | 'other' = msg.senderId === 'current_user_id' ? 'me' : 'other';
             return {
               id: msg.id,
+              msgId: msg.msgId,
               text: msg.text,
               sender,
               timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              sending: msg.status === 'sending',
             };
           });
 
           setMessages(formattedMessages);
         });
 
+      // Listen for incoming messages from WebSocket
+      const unsubscribeMessage = onMessage((data: any) => {
+        console.log('[ChatDetailScreen] Received message from WebSocket:', data);
+        saveMessageToLocal(data);
+        
+        // Update latest msgId if this message is newer
+        if (data.msgId && (!latestMsgId || data.msgId > latestMsgId)) {
+          setLatestMsgId(data.msgId);
+        }
+      });
+
+      // Listen for message_sent event from WebSocket (confirmation for sent messages)
+      const unsubscribeMessageSent = onMessageSent(handleMessageSent);
+
+      // Sync messages from server on mount
+      syncMessagesFromServer();
+
       // Clean up subscription when component unmounts
       return () => {
         if (subscription) {
           subscription.unsubscribe();
         }
+        unsubscribeMessage();
+        unsubscribeMessageSent();
+        leaveChat(chatId);
       };
     }
-  }, [database, chatId]);
+  }, [database, chatId, onMessage, handleMessageSent, syncMessagesFromServer, joinChat, leaveChat]);
 
   const handleSendMessage = async () => {
-    if (inputText.trim() === '' || !database) return;
+    console.log('[ChatDetailScreen] handleSendMessage called');
+    console.log('[ChatDetailScreen] inputText:', inputText);
+    console.log('[ChatDetailScreen] chatId:', chatId);
+
+    if (inputText.trim() === '' || !database) {
+      console.log('[ChatDetailScreen] Skipping send: empty text or no database');
+      return;
+    }
 
     try {
-      // 通过 WebSocket 发送消息到后端
-      sendMessage(chatId, inputText);
+      // 生成消息 ID
+      const msgId = generateMsgId();
+      const tempId = `temp_${Date.now()}`; // 临时 ID 用于本地显示
+      
+      // 获取当前用户 ID（从数据库 token 或上下文）
+      const currentUserId = 'current_user_id'; // TODO: 从 AuthContext 获取
+      
+      // 1. 立即添加到本地数据库（sending: true）
+      await database.write(async () => {
+        await database.collections.get<Message>('messages').create((message: any) => {
+          message.msgId = msgId;
+          message.chatType = 'direct';
+          message.targetId = chatId;
+          message.text = inputText;
+          message.senderId = currentUserId;
+          message.chatSessionId = chatId; // 保留字段用于兼容
+          message.status = 'sending';
+          message.timestamp = Date.now();
+        });
+      });
+      console.log('[ChatDetailScreen] Message saved to local with sending status');
+      
+      // 2. 通过 WebSocket 发送消息到后端（带上 msgId 和 chatType）
+      console.log('[ChatDetailScreen] Calling sendMessage via WebSocket with msgId:', msgId);
+      sendMessage(chatId, inputText, 'text', msgId, 'direct');
 
       // Clear the input
       setInputText('');
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('[ChatDetailScreen] Error sending message:', error);
     }
   };
 
   const handleLongPress = () => {
     if (inputText.trim() === '') return;
     setShowTranslationModal(true);
-  };
-
-  // Save message from WebSocket to local database
-  const saveMessageToLocal = async (data: any) => {
-    if (!database) return;
-    
-    try {
-      const localMessages = await database.collections
-        .get<Message>('messages')
-        .query(Q.where('id', data.id))
-        .fetch();
-
-      if (localMessages.length > 0) {
-        // Message already exists, skip
-        return;
-      }
-
-      await database.write(async () => {
-        await database.collections.get<Message>('messages').create((message: any) => {
-          message.id = data.id;
-          message.text = data.text;
-          message.senderId = data.senderId;
-          message.chatSessionId = data.chatSessionId;
-          message.status = data.status || 'sent';
-          message.timestamp = data.createdAt || Date.now();
-        });
-      });
-    } catch (error) {
-      console.error('Save message to local failed:', error);
-    }
   };
 
   const handleCloseTranslationModal = () => {
@@ -280,13 +564,21 @@ const ChatDetailScreen = () => {
         item.sender === 'me' ? styles.myMessage : styles.otherMessage
       ]}
     >
-      <Text style={[
-        styles.messageText,
-        item.sender === 'me' ? styles.myMessageText : styles.otherMessageText
-      ]}>
-        {item.text}
-      </Text>
-      <Text style={styles.messageTime}>{item.timestamp}</Text>
+      <View style={styles.messageContent}>
+        {item.sending && (
+          <ActivityIndicator size="small" color="#999" style={styles.messageLoading} />
+        )}
+        <Text style={[
+          styles.messageText,
+          item.sender === 'me' ? styles.myMessageText : styles.otherMessageText
+        ]}>
+          {item.text}
+        </Text>
+      </View>
+      <View style={styles.messageFooter}>
+        <Text style={styles.messageTime}>{item.timestamp}</Text>
+        {item.sending && <Text style={styles.messageStatus}>发送中...</Text>}
+      </View>
     </View>
   );
 
@@ -443,6 +735,24 @@ const styles = StyleSheet.create({
     color: '#999999',
     textAlign: 'right',
     marginTop: 4,
+  },
+  messageContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  messageLoading: {
+    marginRight: 5,
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+  },
+  messageStatus: {
+    fontSize: 10,
+    color: '#999999',
+    marginLeft: 5,
   },
   inputContainer: {
     flexDirection: 'row',

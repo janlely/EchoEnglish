@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MainScreen from '../screens/MainScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
+import ContactsScreen from '../screens/ContactsScreen';
 import { useAuth } from '../contexts/AuthContext';
 
 const Tab = createBottomTabNavigator();
@@ -61,12 +62,6 @@ const ProfileScreen = ({ navigation }: any) => {
 };
 
 // Placeholder components for other tabs
-const ContactsScreen = () => (
-  <View style={styles.tabContent}>
-    <Text>Contacts Screen</Text>
-  </View>
-);
-
 const DiscoverScreen = () => (
   <View style={styles.tabContent}>
     <Text>Discover Screen</Text>
