@@ -3,19 +3,24 @@ import { WebSocketService } from '../services/WebSocketService';
 import { useAuth } from './AuthContext';
 import { ApiService } from '../services/ApiService';
 import { authEventEmitter } from '../services/WebSocketService';
+import {
+  WebSocketMessageData,
+  WebSocketUserStatusData,
+  WebSocketTypingData,
+} from '../types/websocket';
 
 interface WebSocketContextType {
   isConnected: boolean;
-  sendMessage: (targetId: string, text: string, type?: string, msgId?: string, chatType?: 'direct' | 'group') => void;
+  sendMessage: (conversationId: string, text: string, type?: string, msgId?: string, chatType?: 'direct' | 'group') => void;
   joinChat: (chatId: string) => void;
   leaveChat: (chatId: string) => void;
   markRead: (chatId: string) => void;
   startTyping: (chatId: string) => void;
   stopTyping: (chatId: string) => void;
-  onMessage: (handler: (data: any) => void) => () => void;
-  onMessageSent: (handler: (data: any) => void) => () => void;
-  onUserStatus: (handler: (data: any) => void) => () => void;
-  onTyping: (handler: (data: any) => void) => () => void;
+  onMessage: (handler: (data: WebSocketMessageData) => void) => () => void;
+  onMessageSent: (handler: (data: WebSocketMessageData) => void) => () => void;
+  onUserStatus: (handler: (data: WebSocketUserStatusData) => void) => () => void;
+  onTyping: (handler: (data: WebSocketTypingData) => void) => () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
@@ -38,10 +43,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           reconnectTimeoutRef.current = null;
         }
       })
-      .catch((error: any) => {
+      .catch((error: Error) => {
         console.warn('⚠️ WebSocket connect failed:', error.message);
         setIsConnected(false);
-        
+
         // 如果是认证失败，清除 token 并触发 logout
         if (error.message === 'Authentication failed' || error.message.includes('Authentication')) {
           console.log('🔑 WebSocket authentication failed, clearing tokens...');
@@ -51,7 +56,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
           return;
         }
-        
+
         // 其他错误，3 秒后重试
         reconnectTimeoutRef.current = setTimeout(() => {
           connectWebSocket();
@@ -100,27 +105,39 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     <WebSocketContext.Provider
       value={{
         isConnected,
-        sendMessage: WebSocketService.sendMessage.bind(WebSocketService),
-        joinChat: WebSocketService.joinChat.bind(WebSocketService),
-        leaveChat: WebSocketService.leaveChat.bind(WebSocketService),
-        markRead: WebSocketService.markRead.bind(WebSocketService),
-        startTyping: WebSocketService.startTyping.bind(WebSocketService),
-        stopTyping: WebSocketService.stopTyping.bind(WebSocketService),
-        onMessage: (handler) => {
-          WebSocketService.on('receive_message', handler);
-          return () => WebSocketService.off('receive_message', handler);
+        sendMessage: (conversationId, text, type, msgId, chatType) => {
+          WebSocketService.sendMessage(conversationId, text, type, msgId, chatType);
         },
-        onMessageSent: (handler) => {
-          WebSocketService.on('message_sent', handler);
-          return () => WebSocketService.off('message_sent', handler);
+        joinChat: (chatId) => {
+          WebSocketService.joinChat(chatId);
         },
-        onUserStatus: (handler) => {
-          WebSocketService.on('user_status_changed', handler);
-          return () => WebSocketService.off('user_status_changed', handler);
+        leaveChat: (chatId) => {
+          WebSocketService.leaveChat(chatId);
         },
-        onTyping: (handler) => {
-          WebSocketService.on('user_typing', handler);
-          return () => WebSocketService.off('user_typing', handler);
+        markRead: (chatId) => {
+          WebSocketService.markRead(chatId);
+        },
+        startTyping: (chatId) => {
+          WebSocketService.startTyping(chatId);
+        },
+        stopTyping: (chatId) => {
+          WebSocketService.stopTyping(chatId);
+        },
+        onMessage: (handler: (data: WebSocketMessageData) => void) => {
+          WebSocketService.on('receive_message', handler as (data: unknown) => void);
+          return () => WebSocketService.off('receive_message', handler as (data: unknown) => void);
+        },
+        onMessageSent: (handler: (data: WebSocketMessageData) => void) => {
+          WebSocketService.on('message_sent', handler as (data: unknown) => void);
+          return () => WebSocketService.off('message_sent', handler as (data: unknown) => void);
+        },
+        onUserStatus: (handler: (data: WebSocketUserStatusData) => void) => {
+          WebSocketService.on('user_status_changed', handler as (data: unknown) => void);
+          return () => WebSocketService.off('user_status_changed', handler as (data: unknown) => void);
+        },
+        onTyping: (handler: (data: WebSocketTypingData) => void) => {
+          WebSocketService.on('user_typing', handler as (data: unknown) => void);
+          return () => WebSocketService.off('user_typing', handler as (data: unknown) => void);
         },
       }}
     >

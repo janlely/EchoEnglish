@@ -7,17 +7,27 @@ export type ChatStackParamList = {
   ChatDetail: {
     chatId: string;
     chatName: string;
-    chatType?: 'direct' | 'group'; // 新增：聊天类型
+    chatType?: 'direct' | 'group';
   };
   SearchUser: undefined;
   FriendRequests: undefined;
+  Contacts: undefined;
+};
+
+// Define the navigation parameters for the main tab navigator
+export type MainTabParamList = {
+  Chats: undefined;
+  Contacts: undefined;
+  Profile: undefined;
 };
 
 // Navigation prop types for each screen
 export type MainScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'MainChat'>;
+export type ContactsScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'Contacts'>;
 export type ChatDetailScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'ChatDetail'>;
 export type SearchUserScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'SearchUser'>;
 export type FriendRequestsScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'FriendRequests'>;
+export type ProfileScreenNavigationProp = StackNavigationProp<MainTabParamList, 'Profile'>;
 
 // Route prop types for screens that receive parameters
 export type ChatDetailScreenRouteProp = RouteProp<ChatStackParamList, 'ChatDetail'>;

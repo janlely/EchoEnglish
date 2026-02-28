@@ -43,4 +43,11 @@ export const config = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
   },
+
+  // OpenRouter API (for AI translation assistant)
+  openRouter: {
+    apiKey: process.env.OPENROUTER_API_KEY || '',
+    baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+  },
 };

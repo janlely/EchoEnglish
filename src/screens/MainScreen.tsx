@@ -5,33 +5,29 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  StatusBar,
   Image,
-  TextInput,
-  Platform,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { ChatSession } from '../database/models';
+import { Conversation, Friend, Group } from '../database/models';
 import { MainScreenNavigationProp } from '../types/navigation';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { API_CONFIG } from '../config/constants';
-import { getAuthToken } from '../services/ApiService';
+import { getConversationsWithUnread } from '../api/conversations';
+import { syncContacts } from '../api/contacts';
+import { getAvatarUrl } from '../utils/avatar';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
-  id: string;
+  conversationId: string;
+  type: 'direct' | 'group';
   targetId: string;
-  chatType: 'direct' | 'group';
   name: string;
-  lastMessage: string;
-  timestamp: string;
-  unreadCount?: number;
   avatar?: string;
-  isOnline?: boolean;
-  lastMessageId?: string;
+  latestMessage?: string;
+  timestamp?: string;
+  unreadCount: number;
+  latestMsgId?: string;
 }
 
 // Chat Session Item Component
@@ -40,27 +36,28 @@ const ChatSessionItem = ({
   onPress
 }: {
   session: ChatSessionInterface;
-  onPress: (id: string) => void
+  onPress: (conversationId: string) => void
 }) => {
   return (
     <TouchableOpacity
       style={styles.chatItemContainer}
-      onPress={() => onPress(session.targetId)}
+      onPress={() => onPress(session.conversationId)}
     >
       {/* Avatar */}
       <View style={styles.avatarContainer}>
         <Image
-          source={{ uri: session.avatar || 'https://placehold.co/50x50' }}
+          source={{ uri: getAvatarUrl(session.avatar, 50) }}
           style={styles.avatar}
         />
-        {session.isOnline && <View style={styles.onlineIndicator} />}
       </View>
 
       {/* Chat Info */}
       <View style={styles.chatInfoContainer}>
         <View style={styles.topRow}>
           <Text style={styles.chatName}>{session.name}</Text>
-          <Text style={styles.timestamp}>{session.timestamp}</Text>
+          {session.timestamp && (
+            <Text style={styles.timestamp}>{session.timestamp}</Text>
+          )}
         </View>
 
         <View style={styles.bottomRow}>
@@ -68,9 +65,9 @@ const ChatSessionItem = ({
             numberOfLines={1}
             style={styles.lastMessage}
           >
-            {session.lastMessage}
+            {session.latestMessage || ''}
           </Text>
-          {session.unreadCount !== undefined && session.unreadCount > 0 && (
+          {session.unreadCount > 0 && (
             <View style={styles.unreadBadge}>
               <Text style={styles.unreadText}>{session.unreadCount}</Text>
             </View>
@@ -84,143 +81,147 @@ const ChatSessionItem = ({
 // Main Screen Component
 const MainScreen = () => {
   const navigation = useNavigation<MainScreenNavigationProp>();
-  const database = useDatabase();
   const [chatSessions, setChatSessions] = useState<ChatSessionInterface[]>([]);
   const [loading, setLoading] = useState(true);
+  const database = useDatabase();
 
-  // Sync chat sessions from server and update local database
-  const syncChatSessions = React.useCallback(async () => {
+  /**
+   * Sync conversations with unread messages from server
+   */
+  const syncConversations = React.useCallback(async () => {
     try {
-      const token = await getAuthToken();
-      if (!token) {
-        console.log('[MainScreen] No token, skip sync');
+      console.log('[MainScreen] Syncing conversations with unread from server...');
+      
+      // Sync contacts first (to ensure friends and groups are up to date)
+      try {
+        await syncContacts();
+        console.log('[MainScreen] Contacts synced');
+      } catch (error) {
+        console.error('[MainScreen] Sync contacts failed:', error);
+      }
+
+      // Get conversations with unread messages
+      const conversations = await getConversationsWithUnread();
+      console.log('[MainScreen] Synced', conversations.length, 'conversations with unread');
+
+      if (!database) {
+        console.log('[MainScreen] Database not available, skipping local update');
         setLoading(false);
         return;
       }
 
-      console.log('[MainScreen] Syncing sessions from server...');
-      const response = await fetch(`${API_CONFIG.BASE_URL}/api/chats/sessions/sync`, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+      // Update local conversations table
+      await database.write(async () => {
+        for (const conv of conversations) {
+          try {
+            // Update or create conversation
+            const existingConversations = await database.collections
+              .get<Conversation>('conversations')
+              .query(Q.where('conversation_id', Q.eq(conv.conversationId)))
+              .fetch();
+
+            if (existingConversations.length > 0) {
+              await existingConversations[0].update((c: Conversation) => {
+                c.type = conv.type;
+                c.targetId = conv.targetId;
+                c.unreadCount = conv.unreadCount;
+                c.latestMsgId = conv.lastReadMsgId || undefined;
+                c.updatedAt = Date.now();
+              });
+            } else {
+              await database.collections.get<Conversation>('conversations').create((c: Conversation) => {
+                c.conversationId = conv.conversationId;
+                c.type = conv.type;
+                c.targetId = conv.targetId;
+                c.unreadCount = conv.unreadCount;
+                c.latestMsgId = conv.lastReadMsgId || undefined;
+                c.createdAt = Date.now();
+                c.updatedAt = Date.now();
+              });
+            }
+          } catch (e) {
+            console.log('[MainScreen] Error updating conversation:', conv.conversationId, e);
+          }
+        }
       });
 
-      const data: any = await response.json();
-
-      if (response.ok && data.success) {
-        console.log('[MainScreen] Synced', data.data.sessions.length, 'sessions');
-        
-        // Update local database
-        if (!database) {
-          console.log('[MainScreen] Database not available');
-          setLoading(false);
-          return;
-        }
-
-        await database.write(async () => {
-          for (const session of data.data.sessions) {
-            try {
-              console.log('[MainScreen] Processing session:', {
-                targetId: session.targetId,
-                name: session.name,
-                chatType: session.chatType,
-                lastMessage: session.lastMessage?.text,
-              });
-              
-              // Check if session exists
-              const existing = await database.collections
-                .get<ChatSession>('chat_sessions')
-                .query(Q.where('target_id', Q.eq(session.targetId)))
-                .fetch();
-
-              if (existing.length > 0) {
-                // Update existing session
-                await existing[0].update((s: any) => {
-                  s.unreadCount = session.unreadCount;
-                  s.lastMessageId = session.lastMessage?.msgId || null;
-                  s.lastMessageText = session.lastMessage?.text || '';
-                  s.lastMessageTime = session.lastMessage?.timestamp
-                    ? new Date(session.lastMessage.timestamp).getTime()
-                    : Date.now();
-                  s.chatType = session.chatType;
-                  s.name = session.name || s.name; // Use server-provided name
-                  s.avatarUrl = session.avatarUrl || s.avatarUrl;
-                });
-              } else {
-                // Create new session
-                await database.collections.get<ChatSession>('chat_sessions').create((s: any) => {
-                  s.targetId = session.targetId;
-                  s.chatType = session.chatType;
-                  s.name = session.name || (session.chatType === 'direct' ? 'Chat' : 'Group');
-                  s.avatarUrl = session.avatarUrl;
-                  s.unreadCount = session.unreadCount;
-                  s.lastMessageId = session.lastMessage?.msgId || null;
-                  s.lastMessageText = session.lastMessage?.text || '';
-                  s.lastMessageTime = session.lastMessage?.timestamp
-                    ? new Date(session.lastMessage.timestamp).getTime()
-                    : Date.now();
-                });
-              }
-            } catch (e) {
-              console.log('[MainScreen] Error updating session:', session.targetId, e);
-            }
-          }
-        });
-
-        console.log('[MainScreen] Local database updated');
-      } else {
-        console.error('[MainScreen] Sync failed:', data.error);
-      }
+      console.log('[MainScreen] Local conversations updated');
     } catch (error) {
-      console.error('[MainScreen] Sync error:', error);
+      console.error('[MainScreen] Sync conversations error:', error);
     } finally {
       setLoading(false);
     }
   }, [database]);
 
-  // Load chat sessions from local database
+  /**
+   * Load chat sessions from local database with friend/group info
+   */
   const loadChatSessionsFromLocal = React.useCallback(async () => {
     if (!database) {
       console.log('[MainScreen] Database not available for loading');
+      setChatSessions([]);
       return;
     }
 
     try {
       console.log('[MainScreen] Loading sessions from local database...');
-      
-      // First, check the table structure
-      const chatSessionsCollection = database.collections.get<ChatSession>('chat_sessions');
-      console.log('[MainScreen] Chat sessions collection:', chatSessionsCollection);
-      
-      const sessions = await database.collections
-        .get<ChatSession>('chat_sessions')
-        .query(
-          // Q.sortBy('last_message_time', Q.desc)
-        )
+
+      // Get all conversations
+      const conversations = await database.collections
+        .get<Conversation>('conversations')
+        .query(Q.sortBy('updated_at', Q.desc))
         .fetch();
 
-      console.log('[MainScreen] Loaded', sessions.length, 'sessions from local');
+      console.log('[MainScreen] Loaded', conversations.length, 'conversations from local');
 
-      const formattedSessions = sessions.map(session => ({
-        id: session.id,
-        targetId: session.targetId,
-        chatType: session.chatType as 'direct' | 'group',
-        name: session.name,
-        lastMessage: session.lastMessageText || '',
-        timestamp: session.lastMessageTime
-          ? new Date(session.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : '',
-        unreadCount: session.unreadCount,
-        avatar: session.avatarUrl,
-        isOnline: session.isOnline,
-        lastMessageId: session.lastMessageId,
-      }));
+      // Load sessions with friend/group info
+      const formattedSessions = await Promise.all(
+        conversations.map(async (conv) => {
+          let name = 'Chat';
+          let avatar: string | undefined;
+
+          if (conv.type === 'direct') {
+            // Get friend info
+            const friends = await database.collections
+              .get<Friend>('friends')
+              .query(Q.where('friend_id', Q.eq(conv.targetId)))
+              .fetch();
+            if (friends.length > 0) {
+              name = friends[0].name;
+              avatar = friends[0].avatarUrl;
+            }
+          } else {
+            // Get group info
+            const groups = await database.collections
+              .get<Group>('groups')
+              .query(Q.where('group_id', Q.eq(conv.targetId)))
+              .fetch();
+            if (groups.length > 0) {
+              name = groups[0].name;
+              avatar = groups[0].avatarUrl;
+            }
+          }
+
+          return {
+            conversationId: conv.conversationId,
+            type: conv.type as 'direct' | 'group',
+            targetId: conv.targetId,
+            name,
+            avatar,
+            latestMessage: conv.latestSummary,
+            timestamp: conv.latestTimestamp
+              ? new Date(conv.latestTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : undefined,
+            unreadCount: conv.unreadCount || 0,
+            latestMsgId: conv.latestMsgId,
+          };
+        })
+      );
 
       setChatSessions(formattedSessions);
     } catch (error: any) {
       console.error('[MainScreen] Load local sessions error:', error.message);
-      console.error('[MainScreen] Error stack:', error.stack);
+      setChatSessions([]);
     }
   }, [database]);
 
@@ -244,40 +245,50 @@ const MainScreen = () => {
           style={{ paddingRight: 16 }}
           onPress={() => navigation.navigate('SearchUser')}
         >
-          <Text style={{ fontSize: 20 }}>+</Text>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#007AFF' }}>+</Text>
         </TouchableOpacity>
       ),
     });
   }, [navigation]);
 
   useEffect(() => {
-    // Initial sync and load
+    // Initial sync and load (only if database is available)
     const init = async () => {
-      await syncChatSessions();
+      if (!database) {
+        console.log('[MainScreen] Database not ready, skipping initial sync');
+        setLoading(false);
+        return;
+      }
+      await syncConversations();
       await loadChatSessionsFromLocal();
     };
     init();
-  }, []);
+  }, [database, syncConversations, loadChatSessionsFromLocal]);
 
   // Refresh when screen is focused
   useFocusEffect(
     React.useCallback(() => {
-      console.log('[MainScreen] Screen focused, syncing sessions...');
-      syncChatSessions().then(() => {
+      if (!database) {
+        console.log('[MainScreen] Database not ready, skipping focus sync');
+        return;
+      }
+      console.log('[MainScreen] Screen focused, syncing conversations...');
+      syncConversations().then(() => {
         loadChatSessionsFromLocal();
       });
-    }, [syncChatSessions, loadChatSessionsFromLocal])
+    }, [database, syncConversations, loadChatSessionsFromLocal])
   );
 
-  const handleChatPress = (targetId: string) => {
+  const handleChatPress = (conversationId: string) => {
     // Find the session that was pressed
-    const session = chatSessions.find(s => s.targetId === targetId);
+    const session = chatSessions.find(s => s.conversationId === conversationId);
     if (session) {
       // Navigate to chat detail screen
+      // For direct chat, pass targetId as chatId; for group chat, pass groupId
       navigation.navigate('ChatDetail', {
         chatId: session.targetId,
         chatName: session.name,
-        chatType: session.chatType,
+        chatType: session.type,
       });
     }
   };
@@ -303,7 +314,7 @@ const MainScreen = () => {
     <FlatList
       data={chatSessions}
       renderItem={renderChatItem}
-      keyExtractor={(item) => item.id}
+      keyExtractor={(item) => item.conversationId}
       style={styles.listContainer}
       showsVerticalScrollIndicator={false}
     />

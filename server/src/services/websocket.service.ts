@@ -171,6 +171,91 @@ class WebSocketService {
       });
     });
 
+    // Handle AI assistant request
+    socket.on('assistant_request', async (data: { id: string; input: string; conversationId: string }) => {
+      logger.info(`[WebSocket] Received assistant_request from ${userId}:`, JSON.stringify(data));
+
+      try {
+        // Import the OpenRouter service
+        const openRouterService = (await import('./openrouter.service')).default;
+
+        // Get context messages
+        const messageService = (await import('./message.service')).default;
+        const contextMessages = await messageService.getRecentMessagesForContext(userId, data.conversationId);
+
+        // Stream the response back to the client
+        await openRouterService.streamAnalyze(
+          {
+            input: data.input,
+            contextMessages
+          },
+          {
+            onStart: () => {
+              socket.emit('assistant_response_chunk', {
+                type: 'assistant_response_chunk',
+                requestId: data.id,
+                data: {
+                  type: 'start'
+                }
+              });
+            },
+            onText: (text) => {
+              socket.emit('assistant_response_chunk', {
+                type: 'assistant_response_chunk',
+                requestId: data.id,
+                data: {
+                  type: 'text',
+                  content: text
+                }
+              });
+            },
+            onSuggestion: (text, highlight) => {
+              socket.emit('assistant_response_chunk', {
+                type: 'assistant_response_chunk',
+                requestId: data.id,
+                data: {
+                  type: 'suggestion',
+                  suggestion: {
+                    text,
+                    highlight
+                  }
+                }
+              });
+            },
+            onDone: () => {
+              socket.emit('assistant_response_chunk', {
+                type: 'assistant_response_chunk',
+                requestId: data.id,
+                data: {
+                  type: 'done'
+                }
+              });
+            },
+            onError: (error) => {
+              socket.emit('assistant_response_chunk', {
+                type: 'assistant_response_chunk',
+                requestId: data.id,
+                data: {
+                  type: 'error',
+                  error
+                }
+              });
+            }
+          }
+        );
+      } catch (error: any) {
+        logger.error(`[WebSocket] Assistant request error:`, error.message);
+        socket.emit('assistant_response_chunk', {
+          type: 'assistant_response_chunk',
+          requestId: data.id,
+          data: {
+            type: 'error',
+            error: error.message
+          }
+        });
+      }
+    });
+
     // Handle disconnect
     socket.on('disconnect', () => {
       this.handleDisconnect(socket, userId);
@@ -222,30 +307,10 @@ class WebSocketService {
 
       // 私聊不发送通知，因为双方是好友，可以直接在消息页面看到
       // 群聊才需要发送通知
+      // Note: chatService is deprecated, this code needs to be updated
       if (!isPrivateChat) {
-        const session = await chatService.getChatSession(chatSessionId, senderId);
-
-        for (const participant of session.participants) {
-          if (participant.userId !== senderId) {
-            await notificationService.sendMessageNotification(
-              participant.userId,
-              session.name || 'Unknown',
-              message.text,
-              chatSessionId
-            );
-
-            // Send real-time notification
-            this.io?.to(`user:${participant.userId}`).emit('new_notification', {
-              type: 'message',
-              title: '新消息',
-              message: `${session.name || 'Unknown'}: ${message.text.substring(0, 50)}`,
-              data: {
-                chatSessionId,
-                messageId: message.id,
-              },
-            });
-          }
-        }
+        // const session = await chatService.getChatSession(chatSessionId, senderId);
+        // Notification logic removed - chatService is deprecated
       }
     } catch (error: any) {
       logger.error('Send notification error:', error);
@@ -289,20 +354,20 @@ class WebSocketService {
         }
       } else {
         // 群聊：获取所有参与者
-        const session = await prisma.chatSession.findUnique({
-          where: { id: chatSessionId },
-          include: { participants: true },
+        const groupId = chatSessionId.replace('group_', '');
+        const members = await prisma.groupMember.findMany({
+          where: { groupId },
         });
 
-        if (session) {
-          for (const participant of session.participants) {
-            if (participant.userId !== senderId) {
+        if (members) {
+          for (const member of members) {
+            if (member.userId !== senderId) {
               // 检查是否在线
-              if (this.userSockets.has(participant.userId)) {
-                logger.info(`[WebSocket] Pushing message to online group member: ${participant.userId}`);
-                this.sendToUser(participant.userId, 'receive_message', message);
+              if (this.userSockets.has(member.userId)) {
+                logger.info(`[WebSocket] Pushing message to online group member: ${member.userId}`);
+                this.sendToUser(member.userId, 'receive_message', message);
               } else {
-                logger.info(`[WebSocket] Group member ${participant.userId} is offline, skip push`);
+                logger.info(`[WebSocket] Group member ${member.userId} is offline, skip push`);
               }
             }
           }

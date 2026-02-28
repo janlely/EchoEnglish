@@ -1,8 +1,13 @@
 import { io, Socket } from 'socket.io-client';
 import { WS_CONFIG } from '../config/constants';
-import { database } from '../database';
-import { Q } from '@nozbe/watermelondb';
-import AuthToken from '../database/models/AuthToken';
+import { TokenStorage } from './TokenStorage';
+import {
+  WebSocketMessageData,
+  WebSocketUserStatusData,
+  WebSocketTypingData,
+  WebSocketMessagesReadData,
+  WebSocketNotificationData,
+} from '../types/websocket';
 
 // Simple cross-platform event emitter
 type AuthEventHandler = () => void;
@@ -29,7 +34,8 @@ class SimpleEventEmitter {
 // Create event emitter for auth events
 export const authEventEmitter = new SimpleEventEmitter();
 
-type WebSocketEventHandler = (data: any) => void;
+// Type-safe event handler
+type WebSocketEventHandler<T = unknown> = (data: T) => void;
 
 class WebSocketServiceClass {
   private socket: Socket | null = null;
@@ -42,23 +48,14 @@ class WebSocketServiceClass {
       console.log('✅ WebSocket already connected');
       return Promise.resolve();
     }
-    
-    // 从 WatermelonDB 获取 Token
-    let token: string | null = null;
-    try {
-      const collection = database.collections.get<AuthToken>('auth_tokens');
-      if (collection) {
-        const tokens = await collection.query().fetch();
-        token = tokens.length > 0 ? tokens[0].accessToken : null;
-      }
-    } catch (error) {
-      // Token 获取失败，继续使用 null token
-    }
+
+    // 从 AsyncStorage 获取 Token
+    const { accessToken: token } = await TokenStorage.getTokens();
 
     // 如果没有 Token，不尝试连接
     if (!token) {
       console.log('⚠️ WebSocket skipped: No token available');
-      return Promise.resolve();
+      return Promise.reject(new Error('No token available'));
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -66,7 +63,7 @@ class WebSocketServiceClass {
       if (this.socket) {
         this.socket.disconnect();
       }
-      
+
       this.socket = io(WS_CONFIG.URL, {
         path: WS_CONFIG.PATH,
         auth: { token },
@@ -82,19 +79,19 @@ class WebSocketServiceClass {
         resolve();
       });
 
-      this.socket.on('connect_error', (error: any) => {
+      this.socket.on('connect_error', (error: Error) => {
         console.error('❌ WebSocket connection error:', error.message);
-        
+
         // 如果是认证失败，触发 logout 事件
         if (error.message.includes('Authentication') || error.message.includes('auth')) {
           console.error('🔑 WebSocket authentication failed, triggering logout...');
           // 触发全局 logout 事件
           authEventEmitter.emit('logout');
         }
-        
+
         reject(error);
       });
-      
+
       this.socket.on('disconnect', (reason: string) => {
         console.log(`⚠️ WebSocket disconnected: ${reason}`);
         // 如果是服务器断开，尝试重连
@@ -111,19 +108,20 @@ class WebSocketServiceClass {
   private setupEventListeners() {
     if (!this.socket) return;
 
-    this.socket.on('receive_message', (data: any) => this.emit('receive_message', data));
-    this.socket.on('message_sent', (data: any) => this.emit('message_sent', data));
-    this.socket.on('user_status_changed', (data: any) => this.emit('user_status_changed', data));
-    this.socket.on('user_typing', (data: any) => this.emit('user_typing', data));
-    this.socket.on('user_stopped_typing', (data: any) => this.emit('user_stopped_typing', data));
-    this.socket.on('messages_read', (data: any) => this.emit('messages_read', data));
-    this.socket.on('new_notification', (data: any) => this.emit('new_notification', data));
-    this.socket.on('error', (error: any) => console.error('WebSocket error:', error));
+    this.socket.on('receive_message', (data: WebSocketMessageData) => this.emit('receive_message', data));
+    this.socket.on('message_sent', (data: WebSocketMessageData) => this.emit('message_sent', data));
+    this.socket.on('user_status_changed', (data: WebSocketUserStatusData) => this.emit('user_status_changed', data));
+    this.socket.on('user_typing', (data: WebSocketTypingData) => this.emit('user_typing', data));
+    this.socket.on('user_stopped_typing', (data: WebSocketTypingData) => this.emit('user_stopped_typing', data));
+    this.socket.on('messages_read', (data: WebSocketMessagesReadData) => this.emit('messages_read', data));
+    this.socket.on('new_notification', (data: WebSocketNotificationData) => this.emit('new_notification', data));
+    this.socket.on('assistant_response_chunk', (data: any) => this.emit('assistant_response_chunk', data));
+    this.socket.on('error', (error: Error) => console.error('WebSocket error:', error));
     this.socket.on('disconnect', () => console.log('⚠️ WebSocket disconnected'));
   }
 
-  sendMessage(targetId: string, text: string, type = 'text', msgId?: string, chatType: 'direct' | 'group' = 'direct') {
-    console.log('[WebSocket] sendMessage called:', { targetId, text, type, msgId, chatType });
+  sendMessage(conversationId: string, text: string, type = 'text', msgId?: string, chatType: 'direct' | 'group' = 'direct') {
+    console.log('[WebSocket] sendMessage called:', { conversationId, text, type, msgId, chatType });
     console.log('[WebSocket] socket connected:', this.socket?.connected);
     console.log('[WebSocket] socket exists:', !!this.socket);
 
@@ -137,7 +135,8 @@ class WebSocketServiceClass {
       return;
     }
 
-    this.socket.emit('send_message', { targetId, text, type, msgId, chatType });
+    // Backend expects targetId, not conversationId
+    this.socket.emit('send_message', { targetId: conversationId, text, type, msgId, chatType });
     console.log('[WebSocket] Message emitted successfully');
   }
 
@@ -161,6 +160,21 @@ class WebSocketServiceClass {
     this.socket?.emit('typing_stop', { chatSessionId: chatId });
   }
 
+  sendAssistantRequest(id: string, input: string, conversationId: string) {
+    if (!this.socket) {
+      console.error('[WebSocket] socket is null, cannot send assistant request');
+      return;
+    }
+
+    if (!this.socket.connected) {
+      console.error('[WebSocket] socket not connected, cannot send assistant request');
+      return;
+    }
+
+    this.socket.emit('assistant_request', { id, input, conversationId });
+    console.log('[WebSocket] Assistant request emitted successfully');
+  }
+
   on(event: string, handler: WebSocketEventHandler) {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, new Set());
@@ -172,7 +186,7 @@ class WebSocketServiceClass {
     this.eventHandlers.get(event)?.delete(handler);
   }
 
-  private emit(event: string, data: any) {
+  private emit(event: string, data: unknown) {
     this.eventHandlers.get(event)?.forEach(handler => handler(data));
   }
 

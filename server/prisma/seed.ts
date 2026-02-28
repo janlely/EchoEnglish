@@ -65,23 +65,57 @@ async function main() {
 
   console.log('Created users:', { user1, user2, user3 });
 
-  // Create a chat session between user1 and user2
-  const chatSession = await prisma.chatSession.create({
-    data: {
-      type: 'direct',
-      participants: {
-        create: [
-          { userId: user1.id, role: 'admin' },
-          { userId: user2.id, role: 'member' },
-        ],
+  // Create friendship between user1 and user2 (skip if exists)
+  try {
+    const friendship = await prisma.friendship.create({
+      data: {
+        userId1: user1.id,
+        userId2: user2.id,
+      },
+    });
+    console.log('Created friendship:', friendship);
+  } catch (error) {
+    console.log('Friendship already exists, skipping');
+  }
+
+  // Create UserConversationState for user1 and user2
+  const conversationId = `direct_${user1.id}_${user2.id}`;
+  
+  await prisma.userConversationState.upsert({
+    where: {
+      userId_conversationId: {
+        userId: user1.id,
+        conversationId,
       },
     },
-    include: {
-      participants: true,
+    update: {},
+    create: {
+      userId: user1.id,
+      conversationId,
+      type: 'direct',
+      targetId: user2.id,
+      unreadCount: 0,
     },
   });
 
-  console.log('Created chat session:', chatSession);
+  await prisma.userConversationState.upsert({
+    where: {
+      userId_conversationId: {
+        userId: user2.id,
+        conversationId,
+      },
+    },
+    update: {},
+    create: {
+      userId: user2.id,
+      conversationId,
+      type: 'direct',
+      targetId: user1.id,
+      unreadCount: 0,
+    },
+  });
+
+  console.log('Created UserConversationState');
 
   // Create notifications
   await prisma.notification.createMany({

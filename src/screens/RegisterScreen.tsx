@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -12,21 +12,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
+import { StackNavigationProp } from '@react-navigation/stack';
 
-const RegisterScreen = ({ navigation }: any) => {
-  const { user, register, loading: authLoading } = useAuth();
+type RegisterStackParamList = {
+  Register: undefined;
+  Login: undefined;
+};
+
+type RegisterScreenNavigationProp = StackNavigationProp<RegisterStackParamList, 'Register'>;
+
+const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationProp }) => {
+  const { register } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // 如果用户已登录，自动跳转到主页面
-  useEffect(() => {
-    if (user && !authLoading) {
-      navigation.replace('Main');
-    }
-  }, [user, authLoading]);
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -58,11 +59,20 @@ const RegisterScreen = ({ navigation }: any) => {
     setLoading(true);
     try {
       await register(name.trim(), email.trim(), password);
-      
-      // 注册成功，直接跳转到验证邮箱页面
-      navigation.navigate('VerifyEmail', { email: email.trim() });
-    } catch (error: any) {
-      Alert.alert('注册失败', error.message || '请稍后重试');
+
+      // 注册成功，跳转到登录页面
+      Alert.alert(
+        '注册成功',
+        '请登录您的账号',
+        [
+          {
+            text: '确定',
+            onPress: () => navigation.navigate('Login'),
+          },
+        ]
+      );
+    } catch (error: unknown) {
+      Alert.alert('注册失败', error instanceof Error ? error.message : '请稍后重试');
     } finally {
       setLoading(false);
     }

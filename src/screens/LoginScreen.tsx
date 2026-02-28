@@ -13,8 +13,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { ApiService } from '../services/ApiService';
+import { StackNavigationProp } from '@react-navigation/stack';
+type LoginStackParamList = {
+  Login: undefined;
+  Register: undefined;
+  VerifyEmail: { email: string };
+};
 
-const LoginScreen = ({ navigation }: any) => {
+type LoginScreenNavigationProp = StackNavigationProp<LoginStackParamList, 'Login'>;
+
+const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) => {
   const { user, login, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,7 +33,11 @@ const LoginScreen = ({ navigation }: any) => {
     console.log('[LoginScreen] useEffect - user:', user ? { id: user.id, email: user.email } : null, 'authLoading:', authLoading);
     if (user && !authLoading) {
       console.log('[LoginScreen] User is logged in, replacing to Main');
-      navigation.replace('Main');
+      // Navigate to parent navigator's MainChat
+      const parentNav = navigation.getParent();
+      if (parentNav) {
+        parentNav.navigate('MainChat');
+      }
     }
   }, [user, authLoading]);
 
@@ -46,14 +58,14 @@ const LoginScreen = ({ navigation }: any) => {
     setLoginLoading(true);
     try {
       // 调用登录接口
-      const data: any = await ApiService.login(email.trim(), password);
+      const data = await ApiService.login(email.trim(), password);
 
       // 登录成功，保存 token
       await login(email.trim(), password);
       // 登录成功后会自动进入主页面（由 AuthContext 的 user 状态控制）
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 检查是否是邮箱未验证错误
-      if (error.message === 'Email not verified') {
+      if (error instanceof Error && error.message === 'Email not verified') {
         Alert.alert(
           '邮箱未验证',
           '请先验证您的邮箱，验证码已发送到您的邮箱。',
@@ -67,7 +79,7 @@ const LoginScreen = ({ navigation }: any) => {
           ]
         );
       } else {
-        Alert.alert('登录失败', error.message || '请稍后重试');
+        Alert.alert('登录失败', error instanceof Error ? error.message : '请稍后重试');
       }
     } finally {
       setLoginLoading(false);
@@ -82,8 +94,8 @@ const LoginScreen = ({ navigation }: any) => {
       Alert.alert('提示', 'Google 登录功能需要配置，请参考文档完成配置');
       // const userInfo = await GoogleSignin.signIn();
       // await loginWithGoogle(userInfo.data.user);
-    } catch (error: any) {
-      Alert.alert('Google 登录失败', error.message || '请稍后重试');
+    } catch (error: unknown) {
+      Alert.alert('Google 登录失败', error instanceof Error ? error.message : '请稍后重试');
     } finally {
       setLoginLoading(false);
     }

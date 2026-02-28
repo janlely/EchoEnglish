@@ -14,28 +14,17 @@ describe('Auth Service', () => {
   beforeEach(async () => {
     const { prisma } = await import('../src/config/database');
     try {
-      // 先删除没有外键依赖的表
+      // 清理测试数据
       await prisma.notification.deleteMany();
       await prisma.message.deleteMany();
-      await prisma.chatParticipant.deleteMany();
+      await prisma.groupMember.deleteMany();
+      await prisma.group.deleteMany();
+      await prisma.friendship.deleteMany();
+      await prisma.friendRequest.deleteMany();
       await prisma.userSetting.deleteMany();
-      // 再删除主表
-      await prisma.chatSession.deleteMany();
       await prisma.user.deleteMany();
     } catch (error) {
-      // 如果清理失败，尝试直接执行 SQL 清理
-      try {
-        await prisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF;');
-        await prisma.notification.deleteMany();
-        await prisma.message.deleteMany();
-        await prisma.chatParticipant.deleteMany();
-        await prisma.userSetting.deleteMany();
-        await prisma.chatSession.deleteMany();
-        await prisma.user.deleteMany();
-        await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON;');
-      } catch (e) {
-        console.error('Cleanup failed:', e);
-      }
+      console.error('Cleanup failed:', error);
     }
   });
 

@@ -1,7 +1,9 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types';
 import messageService from '../services/message.service';
+import conversationService from '../services/conversation.service';
 import logger from '../utils/logger';
+import { generateDirectConversationId, generateGroupConversationId } from '../utils/conversationId';
 
 class MessageController {
   /**
@@ -10,8 +12,8 @@ class MessageController {
   async sendMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { chatSessionId } = req.params;
-      const { text, type } = req.body;
+      const { conversationId } = req.params;
+      const { text, type, msgId, chatType = 'direct' } = req.body;
 
       if (!text || !text.trim()) {
         res.status(400).json({
@@ -22,10 +24,12 @@ class MessageController {
       }
 
       const message = await messageService.sendMessage(
-        chatSessionId,
+        conversationId,
         userId,
         text,
-        type
+        type,
+        msgId,
+        chatType
       );
 
       res.status(201).json({
@@ -45,14 +49,15 @@ class MessageController {
   async getMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { chatSessionId } = req.params;
+      const { conversationId } = req.params;
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 50;
+      const chatType = (req.query.chatType as string) || 'direct';
 
-      const result = await messageService.getMessages(chatSessionId, userId, {
+      const result = await messageService.getMessages(conversationId, userId, {
         page,
         limit,
-      });
+      }, chatType as 'direct' | 'group');
 
       res.status(200).json({
         success: true,
@@ -114,9 +119,10 @@ class MessageController {
   async markMessagesAsRead(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { chatSessionId } = req.params;
+      const { conversationId } = req.params;
+      const chatType = (req.query.chatType as string) || 'direct';
 
-      const result = await messageService.markMessagesAsRead(chatSessionId, userId);
+      const result = await messageService.markMessagesAsRead(conversationId, userId, chatType as 'direct' | 'group');
 
       res.status(200).json({
         success: true,
@@ -135,25 +141,24 @@ class MessageController {
   async syncMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id; // Current user ID
-      const { targetId, chatType } = req.query; // targetId is the OTHER user's ID
+      const { conversationId, chatType } = req.query;
 
-      if (!targetId) {
+      if (!conversationId) {
         res.status(400).json({
           success: false,
-          error: 'targetId is required',
+          error: 'conversationId is required',
         });
         return;
       }
 
-      // For direct chat: get messages FROM targetId TO userId
       const result = await messageService.syncMessages(
-        userId, // Current user (message recipient)
-        targetId as string, // Other user (message sender)
+        userId,
+        conversationId as string,
         (chatType as string) || 'direct',
         50
       );
 
-      logger.info(`Synced ${result.messages.length} messages for user ${userId}, from: ${targetId}`);
+      logger.info(`Synced ${result.messages.length} messages for user ${userId}, conversation: ${conversationId}`);
 
       res.status(200).json({
         success: true,
@@ -166,28 +171,26 @@ class MessageController {
   }
 
   /**
-   * Acknowledge and delete messages
+   * Acknowledge and update lastReadMsgId
    */
   async ackMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id; // Current user ID
-      const { targetId, minMsgId } = req.body; // targetId is the OTHER user's ID
+      const { conversationId, minMsgId } = req.body;
 
-      if (!targetId || !minMsgId) {
+      if (!conversationId || !minMsgId) {
         res.status(400).json({
           success: false,
-          error: 'targetId and minMsgId are required',
+          error: 'conversationId and minMsgId are required',
         });
         return;
       }
 
       const result = await messageService.ackMessages(
-        userId, // Current user (message recipient)
-        targetId, // Other user (message sender)
+        userId,
+        conversationId,
         minMsgId
       );
-
-      logger.info(`Acked ${result.count} messages for user ${userId}, from: ${targetId}`);
 
       res.status(200).json({
         success: true,
@@ -195,6 +198,40 @@ class MessageController {
       });
     } catch (error: any) {
       logger.error('Ack messages controller error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Sync history messages
+   */
+  async syncHistoryMessages(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const { conversationId, chatType, beforeMsgId } = req.query;
+
+      if (!conversationId) {
+        res.status(400).json({
+          success: false,
+          error: 'conversationId is required',
+        });
+        return;
+      }
+
+      const result = await messageService.syncHistoryMessages(
+        userId,
+        conversationId as string,
+        (chatType as string) || 'direct',
+        beforeMsgId as string || null,
+        50
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      logger.error('Sync history messages controller error:', error);
       next(error);
     }
   }
@@ -216,6 +253,55 @@ class MessageController {
       });
     } catch (error: any) {
       logger.error('Sync sessions controller error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get or create direct conversation
+   */
+  async getOrCreateDirectConversation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const { otherUserId } = req.params;
+
+      if (!otherUserId) {
+        res.status(400).json({
+          success: false,
+          error: 'otherUserId is required',
+        });
+        return;
+      }
+
+      const conversation = await conversationService.getOrCreateDirectConversationState(userId, otherUserId);
+
+      res.status(200).json({
+        success: true,
+        data: { conversation },
+      });
+    } catch (error: any) {
+      logger.error('Get or create direct conversation error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get conversations with unread messages
+   */
+  async getConversationsWithUnread(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+
+      const conversations = await conversationService.getConversationsWithUnread(userId);
+
+      logger.info(`Got ${conversations.length} conversations with unread for user ${userId}`);
+
+      res.status(200).json({
+        success: true,
+        data: { conversations },
+      });
+    } catch (error: any) {
+      logger.error('Get conversations with unread error:', error);
       next(error);
     }
   }

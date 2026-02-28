@@ -16,8 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { SearchUserScreenNavigationProp } from '../types/navigation';
 import { API_CONFIG } from '../config/constants';
-import { database } from '../database';
-import AuthToken from '../database/models/AuthToken';
+import { TokenStorage } from '../services/TokenStorage';
 import { Q } from '@nozbe/watermelondb';
 
 interface SearchResult {
@@ -29,16 +28,8 @@ interface SearchResult {
 
 // 获取 Token
 const getAuthToken = async (): Promise<string | null> => {
-  try {
-    const tokens = await database.collections.get<AuthToken>('auth_tokens').query().fetch();
-    if (tokens.length > 0) {
-      return tokens[0].accessToken;
-    }
-    return null;
-  } catch (error) {
-    console.error('[SearchUser] Get token error:', error);
-    return null;
-  }
+  const { accessToken } = await TokenStorage.getTokens();
+  return accessToken;
 };
 
 const SearchUserScreen = () => {

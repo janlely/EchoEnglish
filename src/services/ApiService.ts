@@ -1,7 +1,6 @@
 import { API_CONFIG } from '../config/constants';
-import { database } from '../database';
-import { Q } from '@nozbe/watermelondb';
-import AuthToken from '../database/models/AuthToken';
+import { ApiResponse, LoginResponse, RegisterResponse, UserResponse, RefreshTokenResponse } from '../types/api';
+import { TokenStorage } from './TokenStorage';
 
 class ApiServiceClass {
   private isRefreshing = false;
@@ -9,60 +8,13 @@ class ApiServiceClass {
 
   // 获取 Token
   async getTokens(): Promise<{ accessToken: string | null; refreshToken: string | null }> {
-    try {
-      const collection = database.collections.get<AuthToken>('auth_tokens');
-      if (!collection) {
-        return { accessToken: null, refreshToken: null };
-      }
-
-      const tokens = await collection.query().fetch();
-
-      if (tokens.length === 0) {
-        console.log('[ApiService] getTokens: No tokens found');
-        return { accessToken: null, refreshToken: null };
-      }
-
-      const token = tokens[0];
-      console.log('[ApiService] getTokens: Found tokens, expiresAt:', new Date(token.expiresAt).toISOString());
-      return {
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-      };
-    } catch (error) {
-      console.error('[ApiService] Get tokens failed:', error);
-      return { accessToken: null, refreshToken: null };
-    }
+    return TokenStorage.getTokens();
   }
 
   // 保存 Token（public 方法，供 AuthContext 调用）
   async saveTokens(accessToken: string, refreshToken: string) {
     try {
-      const collection = database.collections.get<AuthToken>('auth_tokens');
-      if (!collection) {
-        console.warn('[ApiService] saveTokens: auth_tokens collection not available');
-        return;
-      }
-
-      await database.write(async () => {
-        const existingTokens = await collection.query().fetch();
-
-        if (existingTokens.length > 0) {
-          // 更新现有 Token
-          await existingTokens[0].update(t => {
-            t.accessToken = accessToken;
-            t.refreshToken = refreshToken;
-            t.expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 天
-          });
-        } else {
-          // 创建新 Token
-          await collection.create(t => {
-            t.accessToken = accessToken;
-            t.refreshToken = refreshToken;
-            t.expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
-          });
-        }
-      });
-      console.log('[ApiService] saveTokens: Tokens saved successfully');
+      await TokenStorage.saveTokens(accessToken, refreshToken);
     } catch (error) {
       console.error('[ApiService] Save tokens failed:', error);
     }
@@ -71,23 +23,14 @@ class ApiServiceClass {
   // 清除 Token
   async clearTokens() {
     try {
-      const collection = database.collections.get<AuthToken>('auth_tokens');
-      if (!collection) {
-        return;
-      }
-
-      await database.write(async () => {
-        const tokens = await collection.query().fetch();
-        await Promise.all(tokens.map(t => t.destroyPermanently()));
-      });
-      console.log('[ApiService] clearTokens: Tokens cleared');
+      await TokenStorage.clearTokens();
     } catch (error) {
       console.error('[ApiService] Clear tokens failed:', error);
     }
   }
 
-  // 通用请求方法
-  private async request<T>(
+  // 通用请求方法（protected 改为 public）
+  async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
@@ -107,22 +50,23 @@ class ApiServiceClass {
       headers,
     });
 
-    const data: any = await response.json();
+    const data = await response.json() as T;
 
     // 处理 401 - Token 过期
-    if (response.status === 401 && !(options.headers as any)?.['_retry']) {
+    if (response.status === 401 && !(options.headers as Record<string, string>)?.['_retry']) {
       return this.handle401(endpoint, options) as Promise<T>;
     }
 
     if (!response.ok) {
-      throw new Error(data.error || 'Request failed');
+      const errorData = data as { error?: string };
+      throw new Error(errorData.error || 'Request failed');
     }
 
-    return data as T;
+    return data;
   }
 
   // 处理 Token 刷新
-  private async handle401(endpoint: string, options: RequestInit): Promise<any> {
+  private async handle401(endpoint: string, options: RequestInit): Promise<unknown> {
     if (this.isRefreshing) {
       return new Promise((resolve) => {
         this.refreshSubscribers.push((token: string) => {
@@ -142,16 +86,16 @@ class ApiServiceClass {
       const tokens = await this.getTokens();
       if (!tokens.refreshToken) throw new Error('No refresh token');
 
-      const data: any = await this.request('/api/auth/refresh', {
+      const data = await this.request<RefreshTokenResponse>('/api/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: tokens.refreshToken }),
       });
 
       // 保存新 Token
-      await this.saveTokens(data.data.accessToken, data.data.refreshToken);
+      await this.saveTokens(data.data!.accessToken, data.data!.refreshToken);
 
       // 通知等待的请求
-      this.refreshSubscribers.forEach(cb => cb(data.data.accessToken));
+      this.refreshSubscribers.forEach(cb => cb(data.data!.accessToken));
       this.refreshSubscribers = [];
 
       // 重试原请求
@@ -168,7 +112,7 @@ class ApiServiceClass {
   // 认证 API
   async login(email: string, password: string) {
     console.log('[ApiService] login: Called with email:', email);
-    return this.request('/api/auth/login', {
+    return this.request<LoginResponse>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -176,7 +120,7 @@ class ApiServiceClass {
 
   async register(name: string, email: string, password: string) {
     console.log('[ApiService] register: Called with email:', email);
-    return this.request('/api/auth/register', {
+    return this.request<RegisterResponse>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
     });
@@ -193,7 +137,7 @@ class ApiServiceClass {
 
   async getCurrentUser() {
     console.log('[ApiService] getCurrentUser: Called');
-    return this.request('/api/auth/me');
+    return this.request<UserResponse>('/api/auth/me');
   }
 
   // 聊天 API

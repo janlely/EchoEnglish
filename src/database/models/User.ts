@@ -28,6 +28,9 @@ export default class User extends Model {
   @field('avatar_url')
   avatarUrl?: string;
 
+  @field('local_avatar_path')
+  localAvatarPath?: string;
+
   @field('is_online')
   isOnline?: boolean;
 

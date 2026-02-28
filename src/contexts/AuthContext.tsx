@@ -1,15 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ApiService } from '../services/ApiService';
-import { initDatabase, getDatabase } from '../database';
+import { authEventEmitter } from '../services/WebSocketService';
+import { getDatabase } from '../database';
 import User from '../database/models/User';
 import { Q } from '@nozbe/watermelondb';
-import { authEventEmitter } from '../services/WebSocketService';
 
 interface AuthUser {
   id: string;
   name: string;
   email: string;
   avatarUrl?: string;
+  localAvatarPath?: string;
 }
 
 interface AuthContextType {
@@ -18,6 +19,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (updates: Partial<AuthUser>) => void;
   isAuthenticated: boolean;
 }
 
@@ -58,26 +60,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const autoLogin = async () => {
     try {
-      const data: any = await ApiService.getCurrentUser();
-      const userData = data.data.user;
+      const data = await ApiService.getCurrentUser();
+      const userData = data.data!.user;
 
       console.log('[AuthContext] autoLogin: Got user data from API:', userData.id);
-
-      // Initialize user-specific database
-      initDatabase(userData.id);
 
       setUser({
         id: userData.id,
         name: userData.name,
         email: userData.email,
-        avatarUrl: userData.avatarUrl,
+        avatarUrl: userData.avatarUrl ?? undefined,
       });
 
-      await syncUserToLocal(userData);
       console.log('[AuthContext] autoLogin: Success');
-    } catch (error: any) {
-      console.log('[AuthContext] autoLogin: Error -', error.message);
-      if (error.message !== 'No refresh token' && error.message !== 'Request failed') {
+    } catch (error: unknown) {
+      console.log('[AuthContext] autoLogin: Error -', error instanceof Error ? error.message : 'Unknown error');
+      if (error instanceof Error && error.message !== 'No token' && error.message !== 'Request failed') {
         console.warn('[AuthContext] Auto login failed:', error.message);
       }
       setLoading(false);
@@ -87,95 +85,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const syncUserToLocal = async (userData: any) => {
-    try {
-      const db = getDatabase();
-      if (!db) {
-        console.log('[AuthContext] syncUserToLocal: database not available');
-        return;
-      }
-
-      const collection = db.collections.get('users');
-      
-      // 使用 userId 字段查找现有用户（后端用户 ID）
-      const existingUser = await collection
-        .query(Q.where('user_id', userData.id))
-        .fetch()
-        .then((users: any[]) => users[0] || null);
-
-      await db.write(async () => {
-        if (existingUser) {
-          // 更新现有用户
-          await existingUser.update((u: any) => {
-            u.name = userData.name;
-            u.email = userData.email;
-            u.avatarUrl = userData.avatarUrl;
-          });
-          console.log('[AuthContext] syncUserToLocal: Updated existing user:', userData.id);
-        } else {
-          // 创建新用户 - 使用 userId 字段存储后端用户 ID
-          await collection.create((u: any) => {
-            u.userId = userData.id;
-            u.name = userData.name;
-            u.email = userData.email;
-            u.avatarUrl = userData.avatarUrl;
-            u.isOnline = true;
-          });
-          console.log('[AuthContext] syncUserToLocal: Created new user:', userData.id);
-        }
-      });
-    } catch (error) {
-      console.error('[AuthContext] syncUserToLocal error:', error);
-      // 不抛出错误，避免影响 user 状态设置
-    }
-  };
-
   const login = async (email: string, password: string) => {
     console.log('[AuthContext] login: Called with email:', email);
-    const data: any = await ApiService.login(email, password);
+    const data = await ApiService.login(email, password);
 
     console.log('[AuthContext] login: Setting user from login response');
-    
-    // Initialize user-specific database
-    initDatabase(data.data.user.id);
-    
+
     setUser({
-      id: data.data.user.id,
-      name: data.data.user.name,
-      email: data.data.user.email,
-      avatarUrl: data.data.user.avatarUrl,
+      id: data.data!.user.id,
+      name: data.data!.user.name,
+      email: data.data!.user.email,
+      avatarUrl: data.data!.user.avatarUrl ?? undefined,
     });
 
     // 保存 token
-    if (data.data.accessToken && data.data.refreshToken) {
+    if (data.data!.accessToken && data.data!.refreshToken) {
       console.log('[AuthContext] login: Saving tokens');
-      await ApiService.saveTokens(data.data.accessToken, data.data.refreshToken);
+      await ApiService.saveTokens(data.data!.accessToken, data.data!.refreshToken);
     }
 
-    await syncUserToLocal(data.data.user);
     console.log('[AuthContext] login: Complete');
   };
 
   const register = async (name: string, email: string, password: string) => {
     console.log('[AuthContext] register: Called with email:', email);
-    const data: any = await ApiService.register(name, email, password);
+    const data = await ApiService.register(name, email, password);
 
-    // Initialize user-specific database
-    initDatabase(data.data.user.id);
-    
-    setUser({
-      id: data.data.user.id,
-      name: data.data.user.name,
-      email: data.data.user.email,
-      avatarUrl: data.data.user.avatarUrl,
-    });
-
-    // 保存 token
-    if (data.data.accessToken && data.data.refreshToken) {
-      await ApiService.saveTokens(data.data.accessToken, data.data.refreshToken);
+    // 注册成功后，只保存 token，不设置用户状态
+    // 用户需要去邮箱验证后，再通过登录流程进入应用
+    if (data.data!.accessToken && data.data!.refreshToken) {
+      await ApiService.saveTokens(data.data!.accessToken, data.data!.refreshToken);
     }
 
-    await syncUserToLocal(data.data.user);
+    console.log('[AuthContext] register: Success, user should verify email');
   };
 
   const logout = async () => {
@@ -188,12 +130,66 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const updateUser = (updates: Partial<AuthUser>) => {
+    console.log('[AuthContext] updateUser:', updates);
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updatedUser = { ...prev, ...updates };
+
+      // Sync to local database
+      syncUserToLocalDB(updatedUser);
+
+      return updatedUser;
+    });
+  };
+
+  const syncUserToLocalDB = async (userData: AuthUser) => {
+    try {
+      const db = getDatabase();
+      if (!db) {
+        console.log('[AuthContext] Database not available');
+        return;
+      }
+
+      const collection = db.collections.get<User>('users');
+      const existingUser = await collection
+        .query(Q.where('user_id', userData.id))
+        .fetch()
+        .then((users: User[]) => users[0] || null);
+
+      await db.write(async () => {
+        if (existingUser) {
+          await existingUser.update((u: User) => {
+            u.name = userData.name;
+            u.email = userData.email;
+            u.avatarUrl = userData.avatarUrl ?? undefined;
+            u.localAvatarPath = userData.localAvatarPath ?? undefined;
+          });
+          console.log('[AuthContext] Updated local user:', userData.id);
+        } else {
+          await collection.create((u: User) => {
+            u.userId = userData.id;
+            u.name = userData.name;
+            u.email = userData.email;
+            u.avatarUrl = userData.avatarUrl ?? undefined;
+            u.localAvatarPath = userData.localAvatarPath ?? undefined;
+            u.isOnline = true;
+          });
+          console.log('[AuthContext] Created local user:', userData.id);
+        }
+      });
+    } catch (error) {
+      console.error('[AuthContext] Sync to local DB error:', error);
+    }
+  };
+
   const value = {
     user,
     loading,
     login,
     register,
     logout,
+    updateUser,
     isAuthenticated: !!user,
   };
 

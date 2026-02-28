@@ -49,7 +49,7 @@ export const getMessagesByChatSession = async (chatSessionId: string) => {
 export const createChatSession = async (data: Partial<ChatSession>) => {
   try {
     const newChatSession = await database.write(async () => {
-      return database.collections.get('chat_sessions').create(chatSession => {
+      return database.collections.get<ChatSession>('chat_sessions').create(chatSession => {
         Object.assign(chatSession, data);
       });
     });
@@ -64,7 +64,7 @@ export const createChatSession = async (data: Partial<ChatSession>) => {
 export const createMessage = async (data: Partial<Message>) => {
   try {
     const newMessage = await database.write(async () => {
-      return database.collections.get('messages').create(message => {
+      return database.collections.get<Message>('messages').create(message => {
         Object.assign(message, data);
       });
     });
@@ -82,14 +82,14 @@ export const updateChatSessionLastMessage = async (chatSessionId: string, messag
     if (!chatSession) {
       throw new Error(`Chat session with id ${chatSessionId} not found`);
     }
-    
+
     await database.write(async () => {
-      await chatSession.update(chatSession => {
-        chatSession.lastMessageId = messageId;
-        chatSession.updatedAt = Date.now();
+      await chatSession.update((s: ChatSession) => {
+        s.lastMessageId = messageId;
+        s.updatedAt = Date.now();
       });
     });
-    
+
     return chatSession;
   } catch (error) {
     console.error('Error updating chat session last message:', error);
@@ -104,14 +104,14 @@ export const incrementUnreadCount = async (chatSessionId: string) => {
     if (!chatSession) {
       throw new Error(`Chat session with id ${chatSessionId} not found`);
     }
-    
+
     await database.write(async () => {
-      await chatSession.update(chatSession => {
-        chatSession.unreadCount = (chatSession.unreadCount || 0) + 1;
-        chatSession.updatedAt = Date.now();
+      await chatSession.update((s: ChatSession) => {
+        s.unreadCount = (s.unreadCount || 0) + 1;
+        s.updatedAt = Date.now();
       });
     });
-    
+
     return chatSession;
   } catch (error) {
     console.error('Error incrementing unread count:', error);
@@ -126,14 +126,14 @@ export const resetUnreadCount = async (chatSessionId: string) => {
     if (!chatSession) {
       throw new Error(`Chat session with id ${chatSessionId} not found`);
     }
-    
+
     await database.write(async () => {
-      await chatSession.update(chatSession => {
-        chatSession.unreadCount = 0;
-        chatSession.updatedAt = Date.now();
+      await chatSession.update((s: ChatSession) => {
+        s.unreadCount = 0;
+        s.updatedAt = Date.now();
       });
     });
-    
+
     return chatSession;
   } catch (error) {
     console.error('Error resetting unread count:', error);

@@ -6,8 +6,10 @@ export default async () => {
     // 删除所有数据（按依赖关系倒序）
     await prisma.notification.deleteMany();
     await prisma.message.deleteMany();
-    await prisma.chatParticipant.deleteMany();
-    await prisma.chatSession.deleteMany();
+    await prisma.groupMember.deleteMany();
+    await prisma.group.deleteMany();
+    await prisma.friendship.deleteMany();
+    await prisma.friendRequest.deleteMany();
     await prisma.userSetting.deleteMany();
     await prisma.user.deleteMany();
   } catch (error) {

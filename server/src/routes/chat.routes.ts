@@ -18,11 +18,13 @@ const createChatSchema = z.object({
 
 const sendMessageSchema = z.object({
   params: z.object({
-    chatSessionId: z.string(),
+    conversationId: z.string(),
   }),
   body: z.object({
     text: z.string().min(1),
     type: z.enum(['text', 'image', 'file']).optional(),
+    msgId: z.string().optional(),
+    chatType: z.enum(['direct', 'group']).optional(),
   }),
 });
 
@@ -32,6 +34,17 @@ const updateMessageSchema = z.object({
   }),
   body: z.object({
     text: z.string().min(1),
+  }),
+});
+
+const getMessagesSchema = z.object({
+  params: z.object({
+    conversationId: z.string(),
+  }),
+  query: z.object({
+    page: z.string().optional(),
+    limit: z.string().optional(),
+    chatType: z.string().optional(),
   }),
 });
 
@@ -46,16 +59,21 @@ router.put('/:id', chatController.updateChat);
 router.delete('/:id', chatController.deleteChat);
 router.post('/:id/read', chatController.markChatAsRead);
 
-// Message routes
-router.post('/:chatSessionId/messages', validateRequest(sendMessageSchema), messageController.sendMessage);
-router.get('/:chatSessionId/messages', messageController.getMessages);
+// Message routes (using conversationId)
+router.post('/conversations/:conversationId/messages', validateRequest(sendMessageSchema), messageController.sendMessage);
+router.get('/conversations/:conversationId/messages', validateRequest(getMessagesSchema), messageController.getMessages);
 router.put('/messages/:messageId', validateRequest(updateMessageSchema), messageController.updateMessage);
 router.delete('/messages/:messageId', messageController.deleteMessage);
-router.post('/:chatSessionId/messages/read', messageController.markMessagesAsRead);
+router.post('/conversations/:conversationId/messages/read', messageController.markMessagesAsRead);
 
-// Message sync routes
+// Message sync routes (using conversationId in query params)
 router.get('/sessions/sync', messageController.syncSessions);
 router.get('/messages/sync', messageController.syncMessages);
+router.get('/messages/history', messageController.syncHistoryMessages);
 router.post('/messages/ack', messageController.ackMessages);
+
+// New conversation routes
+router.get('/conversations/with-unread', messageController.getConversationsWithUnread);
+router.get('/conversations/direct/:otherUserId', messageController.getOrCreateDirectConversation);
 
 export default router;

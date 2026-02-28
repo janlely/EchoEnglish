@@ -8,6 +8,7 @@ export default class Message extends Model {
   static associations: Associations = {
     sender: { type: 'belongs_to', key: 'sender_id' },
     chat_session: { type: 'belongs_to', key: 'chat_session_id' },
+    conversation: { type: 'belongs_to', key: 'conversation_id' },
   };
 
   @field('text')
@@ -17,13 +18,16 @@ export default class Message extends Model {
   senderId!: string;
 
   @field('chat_session_id')
-  chatSessionId!: string; // 保留字段用于兼容
+  chatSessionId?: string; // 保留字段用于兼容
+
+  @field('conversation_id')
+  conversationId?: string; // 新的外键字段
 
   @field('chat_type')
   chatType!: string; // 'direct' | 'group'
 
   @field('target_id')
-  targetId!: string; // 私聊：对方用户 ID，群聊：群 ID
+  targetId?: string; // 私聊：对方用户 ID，群聊：群 ID (保留用于兼容)
 
   @field('status')
   status!: string; // 'sending', 'sent', 'delivered', 'read'

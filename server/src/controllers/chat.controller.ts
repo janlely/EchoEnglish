@@ -51,7 +51,7 @@ class ChatController {
 
       res.status(200).json({
         success: true,
-        data: result.data,
+        data: result,
         pagination: result.pagination,
       });
     } catch (error: any) {
