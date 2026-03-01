@@ -15,6 +15,7 @@ router.get('/friends', contactsController.getFriends);
 
 // Groups
 router.get('/groups', contactsController.getGroups);
+router.get('/groups/:groupId', contactsController.getGroup);
 router.post('/groups', contactsController.createGroup);
 router.post('/groups/:groupId/members', contactsController.addGroupMember);
 router.delete('/groups/:groupId/members', contactsController.removeGroupMember);

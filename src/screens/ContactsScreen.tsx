@@ -14,7 +14,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
 import { syncContacts, getFriends, getGroups } from '../api/contacts';
-import { Friend, Group, SyncCursor } from '../database/models';
+import { Friend, Group, GroupMember, SyncCursor } from '../database/models';
 import { ChatDetailScreenNavigationProp, ContactsScreenNavigationProp } from '../types/navigation';
 import { TokenStorage } from '../services/TokenStorage';
 import { getAvatarUrl } from '../utils/avatar';
@@ -394,23 +394,8 @@ const ContactsScreen = () => {
 
       // Update local database
       await db.write(async () => {
-        // Update friends
-        for (const friend of result.friends.added) {
-          try {
-            await db.collections.get<Friend>('friends').create((f: Friend) => {
-              f.friendId = friend.id;
-              f.name = friend.name;
-              f.avatarUrl = friend.avatarUrl || undefined;
-              f.isOnline = friend.isOnline;
-              f.createdAt = Date.now();
-              f.updatedAt = Date.now();
-            });
-          } catch (e) {
-            console.log('[Contacts] Friend already exists:', friend.id);
-          }
-        }
-
-        for (const friend of result.friends.updated) {
+        // Helper function to create or update friend
+        const upsertFriend = async (friend: any) => {
           const existing = await db.collections
             .get<Friend>('friends')
             .query(Q.where('friend_id', Q.eq(friend.id)))
@@ -420,30 +405,25 @@ const ContactsScreen = () => {
             await existing[0].update((f: Friend) => {
               f.name = friend.name;
               f.avatarUrl = friend.avatarUrl || undefined;
+              f.email = friend.email;
               f.isOnline = friend.isOnline;
               f.updatedAt = Date.now();
             });
-          }
-        }
-
-        // Update groups
-        for (const group of result.groups.added) {
-          try {
-            await db.collections.get<Group>('groups').create((g: Group) => {
-              g.groupId = group.id;
-              g.name = group.name;
-              g.avatarUrl = group.avatarUrl || undefined;
-              g.ownerId = group.ownerId;
-              g.memberIds = JSON.stringify(group.memberIds);
-              g.createdAt = Date.now();
-              g.updatedAt = Date.now();
+          } else {
+            await db.collections.get<Friend>('friends').create((f: Friend) => {
+              f.friendId = friend.id;
+              f.name = friend.name;
+              f.avatarUrl = friend.avatarUrl || undefined;
+              f.email = friend.email;
+              f.isOnline = friend.isOnline;
+              f.createdAt = Date.now();
+              f.updatedAt = Date.now();
             });
-          } catch (e) {
-            console.log('[Contacts] Group already exists:', group.id);
           }
-        }
+        };
 
-        for (const group of result.groups.updated) {
+        // Helper function to create or update group
+        const upsertGroup = async (group: any) => {
           const existing = await db.collections
             .get<Group>('groups')
             .query(Q.where('group_id', Q.eq(group.id)))
@@ -457,6 +437,64 @@ const ContactsScreen = () => {
               g.memberIds = JSON.stringify(group.memberIds);
               g.updatedAt = Date.now();
             });
+          } else {
+            await db.collections.get<Group>('groups').create((g: Group) => {
+              g.groupId = group.id;
+              g.name = group.name;
+              g.avatarUrl = group.avatarUrl || undefined;
+              g.ownerId = group.ownerId;
+              g.memberIds = JSON.stringify(group.memberIds);
+              g.createdAt = Date.now();
+              g.updatedAt = Date.now();
+            });
+          }
+        };
+
+        // Helper function to create or update group member
+        const upsertGroupMember = async (groupId: string, member: any) => {
+          const existing = await db.collections
+            .get<GroupMember>('group_members')
+            .query(Q.and(
+              Q.where('group_id', Q.eq(groupId)),
+              Q.where('user_id', Q.eq(member.userId))
+            ))
+            .fetch();
+
+          if (existing.length > 0) {
+            await existing[0].update((m: GroupMember) => {
+              m.name = member.name;
+              m.avatarUrl = member.avatarUrl || undefined;
+              m.role = member.role;
+              m.updatedAt = Date.now();
+            });
+          } else {
+            await db.collections.get<GroupMember>('group_members').create((m: GroupMember) => {
+              m.groupId = groupId;
+              m.userId = member.userId;
+              m.name = member.name;
+              m.avatarUrl = member.avatarUrl || undefined;
+              m.role = member.role;
+              m.joinedAt = Date.now();
+              m.createdAt = Date.now();
+              m.updatedAt = Date.now();
+            });
+          }
+        };
+
+        // Update friends (added and updated)
+        for (const friend of [...result.friends.added, ...result.friends.updated]) {
+          await upsertFriend(friend);
+        }
+
+        // Update groups (added and updated)
+        for (const group of [...result.groups.added, ...result.groups.updated]) {
+          await upsertGroup(group);
+          
+          // Update group members
+          if (group.members && group.members.length > 0) {
+            for (const member of group.members) {
+              await upsertGroupMember(group.id, member);
+            }
           }
         }
 

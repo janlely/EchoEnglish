@@ -8,12 +8,20 @@ export interface Friend {
   isOnline?: boolean;
 }
 
+export interface GroupMember {
+  userId: string;
+  name: string;
+  avatarUrl?: string | null;
+  role: 'owner' | 'admin' | 'member';
+}
+
 export interface Group {
   id: string;
   name: string;
   avatarUrl?: string | null;
   ownerId: string;
   memberIds: string[];
+  members?: GroupMember[]; // Group member details
 }
 
 export interface SyncContactsResult {
@@ -79,6 +87,16 @@ export const getFriends = async (): Promise<Friend[]> => {
 export const getGroups = async (): Promise<Group[]> => {
   const response = await ApiService.request<{ success: boolean; data: { groups: Group[] } }>('/api/contacts/groups');
   return response.data!.groups;
+};
+
+/**
+ * 获取单个群信息
+ */
+export const getGroupInfo = async (groupId: string): Promise<Group> => {
+  const response = await ApiService.request<{ success: boolean; data: { group: Group } }>(
+    `/api/contacts/groups/${groupId}`
+  );
+  return response.data!.group;
 };
 
 /**

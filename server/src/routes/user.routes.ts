@@ -11,6 +11,12 @@ router.use(authMiddleware);
 // Get user profile
 router.get('/profile', userController.getProfile);
 
+// Get user by ID
+router.get('/:userId', userController.getUserById);
+
+// Get users by IDs (batch)
+router.post('/batch', userController.getUsersByIds);
+
 // Upload avatar (supports multipart/form-data and JSON with base64)
 router.post('/avatar', uploadMiddleware, userController.uploadAvatar);
 

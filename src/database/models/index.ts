@@ -11,6 +11,7 @@ export { default as AuthToken } from './AuthToken';
 // New contact models
 export { default as Friend } from './Friend';
 export { default as Group } from './Group';
+export { default as GroupMember } from './GroupMember';
 export { default as SyncCursor } from './SyncCursor';
 
 // Schema

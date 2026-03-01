@@ -66,6 +66,26 @@ class ContactController {
   }
 
   /**
+   * 获取单个群信息
+   */
+  async getGroup(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const { groupId } = req.params;
+
+      const group = await contactService.getGroup(userId, groupId);
+
+      res.status(200).json({
+        success: true,
+        data: { group },
+      });
+    } catch (error: any) {
+      logger.error('Get group controller error:', error);
+      next(error);
+    }
+  }
+
+  /**
    * 创建群组
    */
   async createGroup(req: AuthRequest, res: Response, next: NextFunction) {

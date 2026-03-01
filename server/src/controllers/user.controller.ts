@@ -71,6 +71,60 @@ class UserController {
       next(error);
     }
   }
+
+  /**
+   * Get user by ID
+   */
+  async getUserById(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { userId } = req.params;
+
+      const user = await userService.getUserById(userId);
+
+      if (!user) {
+        res.status(404).json({
+          success: false,
+          error: 'User not found',
+        });
+        return;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: { user },
+      });
+    } catch (error: any) {
+      logger.error('Get user by ID error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Get users by IDs (batch)
+   */
+  async getUsersByIds(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { userIds } = req.body;
+
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'userIds array is required',
+        });
+        return;
+      }
+
+      const users = await userService.getUsersByIds(userIds);
+
+      res.status(200).json({
+        success: true,
+        data: { users },
+      });
+    } catch (error: any) {
+      logger.error('Get users by IDs error:', error);
+      next(error);
+    }
+  }
 }
 
 export default new UserController();

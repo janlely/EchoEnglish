@@ -14,6 +14,10 @@ import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { WebSocketProvider } from './src/contexts/WebSocketContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import AuthNavigator from './src/navigation/AuthNavigator';
+import logger from './src/utils/logger';
+
+// 设置日志级别（生产环境可改为 'info' 或 'warn'）
+logger.setLevel('debug'); // 可选值：'debug' | 'info' | 'warn' | 'error'
 
 // 内部组件：根据登录状态渲染不同的内容
 const AppContent = () => {
@@ -25,14 +29,14 @@ const AppContent = () => {
   useEffect(() => {
     const syncUserData = async () => {
       if (isAuthenticated && user) {
-        console.log('[App] User logged in, initializing database for:', user.id);
+        logger.info('App', 'User logged in, initializing database for:', user.id);
         setDbInitializing(true);
-        
+
         // 初始化数据库
         initDatabase(user.id);
         const db = getDatabase();
         setCurrentDb(db);
-        
+
         // 同步用户数据到本地数据库
         if (db) {
           try {
@@ -41,7 +45,7 @@ const AppContent = () => {
               .query()
               .fetch()
               .then((users: any[]) => users[0] || null);
-            
+
             await db.write(async () => {
               if (existingUser) {
                 await existingUser.update((u: any) => {
@@ -49,7 +53,7 @@ const AppContent = () => {
                   u.email = user.email;
                   u.avatarUrl = user.avatarUrl ?? undefined;
                 });
-                console.log('[App] Updated existing user:', user.id);
+                logger.info('App', 'Updated existing user:', user.id);
               } else {
                 await collection.create((u: any) => {
                   u.userId = user.id;
@@ -58,21 +62,21 @@ const AppContent = () => {
                   u.avatarUrl = user.avatarUrl ?? undefined;
                   u.isOnline = true;
                 });
-                console.log('[App] Created new user:', user.id);
+                logger.info('App', 'Created new user:', user.id);
               }
             });
           } catch (error) {
-            console.error('[App] syncUserToLocal error:', error);
+            logger.error('App', 'syncUserToLocal error:', error);
           }
         }
-        
+
         setDbInitializing(false);
       } else if (!isAuthenticated) {
-        console.log('[App] User logged out, clearing database');
+        logger.info('App', 'User logged out, clearing database');
         setCurrentDb(null);
       }
     };
-    
+
     syncUserData();
   }, [isAuthenticated, user]);
 

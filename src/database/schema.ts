@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 6, // Increment version for schema changes
+  version: 7, // Increment version for schema changes
   tables: [
     // ===== User tables =====
 
@@ -47,6 +47,21 @@ export const schema = appSchema({
         { name: 'avatar_url', type: 'string', isOptional: true },
         { name: 'owner_id', type: 'string' },
         { name: 'member_ids', type: 'string' },     // JSON 字符串，成员 ID 列表
+        { name: 'created_at', type: 'number' },
+        { name: 'updated_at', type: 'number' },
+      ],
+    }),
+
+    // Group members table - 群成员详细信息
+    tableSchema({
+      name: 'group_members',
+      columns: [
+        { name: 'group_id', type: 'string' },       // 群 ID
+        { name: 'user_id', type: 'string' },        // 用户 ID
+        { name: 'name', type: 'string' },           // 用户名称
+        { name: 'avatar_url', type: 'string', isOptional: true }, // 用户头像
+        { name: 'role', type: 'string' },           // 'owner' | 'admin' | 'member'
+        { name: 'joined_at', type: 'number' },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

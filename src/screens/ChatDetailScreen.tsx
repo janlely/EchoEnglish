@@ -34,9 +34,12 @@ import { generateDirectConversationId, generateGroupConversationId, isGroupConve
 import { useAuth } from '../contexts/AuthContext';
 import { WebSocketMessageData } from '../types/websocket';
 import { getConversationInfo } from '../api/conversations';
-import { Friend, Group } from '../database/models';
+import { syncContacts } from '../api/contacts';
+import { getUserInfo, getUsersBatch } from '../api/user';
+import { Friend, Group, GroupMember } from '../database/models';
 import TranslationAssistantModal from '../components/TranslationAssistantModal';
 import { ContextMessage } from '../api/assistant';
+import logger from '../utils/logger';
 
 // 生成消息 ID（时间戳 + 随机数）
 const generateMsgId = () => {
@@ -85,8 +88,6 @@ const ChatDetailScreen = () => {
   const [messages, setMessages] = useState<MessageInterface[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [showTranslationAssistant, setShowTranslationAssistant] = useState(false);
   const [latestMsgId, setLatestMsgId] = useState<string | null>(null); // 最新已同步的 msgId
   
@@ -97,9 +98,9 @@ const ChatDetailScreen = () => {
   // Store friend avatars for use in subscription callback
   const friendAvatarsRef = useRef<Map<string, string>>(new Map());
 
-  console.log('[ChatDetailScreen] route.params:', route.params);
-  console.log('[ChatDetailScreen] chatId:', chatId, 'chatType:', chatType);
-  console.log('[ChatDetailScreen] conversationId:', conversationId);
+  logger.debug('ChatDetailScreen', 'route.params:', route.params);
+  logger.debug('ChatDetailScreen', 'chatId:', chatId, 'chatType:', chatType);
+  logger.debug('ChatDetailScreen', 'conversationId:', conversationId);
 
   const scrollViewRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
@@ -117,8 +118,8 @@ const ChatDetailScreen = () => {
   }));
 
   useEffect(() => {
-    console.log("insets.bottom", insets.bottom);
-    
+    logger.debug('ChatDetailScreen', 'insets.bottom:', insets.bottom);
+
     // Hide the tab bar when this screen is active
     if (tabNavigation) {
       tabNavigation.setOptions({
@@ -165,16 +166,106 @@ const ChatDetailScreen = () => {
     };
   }, [navigation, chatName, tabNavigation]);
 
+  /**
+   * Sync group members info
+   */
+  const syncGroupMembers = React.useCallback(async (groupId: string, userIds: string[]) => {
+    if (!database) return;
+
+    try {
+      logger.debug('ChatDetailScreen', 'Syncing group members for group:', groupId, 'userIds:', userIds);
+      const users = await getUsersBatch(userIds);
+
+      await database.write(async () => {
+        for (const user of users) {
+          // Check if member already exists
+          const existingMembers = await database.collections
+            .get<GroupMember>('group_members')
+            .query(Q.and(
+              Q.where('group_id', Q.eq(groupId)),
+              Q.where('user_id', Q.eq(user.id))
+            ))
+            .fetch();
+
+          if (existingMembers.length > 0) {
+            // Update existing member
+            await existingMembers[0].update((m: GroupMember) => {
+              m.name = user.name;
+              m.avatarUrl = user.avatarUrl || undefined;
+              m.updatedAt = Date.now();
+            });
+            logger.debug('ChatDetailScreen', 'Updated group member:', user.id);
+          } else {
+            // Create new member
+            await database.collections.get<GroupMember>('group_members').create((m: GroupMember) => {
+              m.groupId = groupId;
+              m.userId = user.id;
+              m.name = user.name;
+              m.avatarUrl = user.avatarUrl || undefined;
+              m.role = 'member';
+              m.joinedAt = Date.now();
+              m.createdAt = Date.now();
+              m.updatedAt = Date.now();
+            });
+            logger.debug('ChatDetailScreen', 'Created group member:', user.id);
+          }
+        }
+      });
+      logger.debug('ChatDetailScreen', 'Group members synced:', userIds.length);
+    } catch (error: any) {
+      logger.error('ChatDetailScreen', 'Sync group members error:', error.message);
+    }
+  }, [database]);
+
+  /**
+   * Sync user info for direct chat
+   */
+  const syncUserInfo = React.useCallback(async (userId: string) => {
+    if (!database) return;
+
+    try {
+      logger.debug('ChatDetailScreen', 'Syncing user info for:', userId);
+      const userInfo = await getUserInfo(userId);
+
+      await database.write(async () => {
+        const existingFriends = await database.collections
+          .get<Friend>('friends')
+          .query(Q.where('friend_id', Q.eq(userId)))
+          .fetch();
+
+        if (existingFriends.length > 0) {
+          await existingFriends[0].update((f: Friend) => {
+            f.name = userInfo.name;
+            f.avatarUrl = userInfo.avatarUrl || undefined;
+            f.updatedAt = Date.now();
+          });
+          logger.debug('ChatDetailScreen', 'Updated friend info:', userId);
+        } else {
+          await database.collections.get<Friend>('friends').create((f: Friend) => {
+            f.friendId = userId;
+            f.name = userInfo.name;
+            f.avatarUrl = userInfo.avatarUrl || undefined;
+            f.createdAt = Date.now();
+            f.updatedAt = Date.now();
+          });
+          logger.debug('ChatDetailScreen', 'Created friend info:', userId);
+        }
+      });
+    } catch (error: any) {
+      logger.error('ChatDetailScreen', 'Sync user info error:', error.message);
+    }
+  }, [database]);
+
   // Sync conversation info (to update friend/group info)
   const syncConversationInfo = React.useCallback(async () => {
     try {
-      console.log('[ChatDetailScreen] Syncing conversation info:', conversationId);
-      
+      logger.debug('ChatDetailScreen', 'Syncing conversation info:', conversationId);
+
       const info = await getConversationInfo(conversationId);
-      console.log('[ChatDetailScreen] Conversation info:', info);
+      logger.debug('ChatDetailScreen', 'Conversation info:', info);
 
       if (!database) {
-        console.log('[ChatDetailScreen] Database not available, skipping contact update');
+        logger.warn('ChatDetailScreen', 'Database not available, skipping contact update');
         return;
       }
 
@@ -202,7 +293,7 @@ const ChatDetailScreen = () => {
               f.updatedAt = Date.now();
             });
           }
-          console.log('[ChatDetailScreen] Friend info synced:', info.targetId);
+          logger.debug('ChatDetailScreen', 'Friend info synced:', info.targetId);
         } else {
           // Update group info
           const existingGroups = await database.collections
@@ -227,11 +318,11 @@ const ChatDetailScreen = () => {
               g.updatedAt = Date.now();
             });
           }
-          console.log('[ChatDetailScreen] Group info synced:', info.targetId);
+          logger.debug('ChatDetailScreen', 'Group info synced:', info.targetId);
         }
       });
     } catch (error) {
-      console.error('[ChatDetailScreen] Sync conversation info error:', error);
+      logger.error('ChatDetailScreen', 'Sync conversation info error:', error);
     }
   }, [database, conversationId]);
 
@@ -240,7 +331,7 @@ const ChatDetailScreen = () => {
     if (!database) return;
 
     try {
-      console.log('[ChatDetailScreen] saveMessageToLocal called with:', data);
+      logger.debug('ChatDetailScreen', 'saveMessageToLocal called with:', data);
 
       // 通过 msgId 查找（用于更新发送中的消息）
       let localMessage = null;
@@ -250,7 +341,7 @@ const ChatDetailScreen = () => {
           .query(Q.where('msg_id', Q.eq(data.msgId)))
           .fetch();
         localMessage = messagesByMsgId[0];
-        console.log('[ChatDetailScreen] Found message by msgId:', localMessage ? 'yes' : 'no');
+        logger.debug('ChatDetailScreen', 'Found message by msgId:', localMessage ? 'yes' : 'no');
       }
 
       if (localMessage) {
@@ -260,7 +351,7 @@ const ChatDetailScreen = () => {
             msg.status = 'sent';
           });
         });
-        console.log('[ChatDetailScreen] Message status updated to sent');
+        logger.debug('ChatDetailScreen', 'Message status updated to sent');
       } else {
         // 创建新消息（接收到的消息）
         await database.write(async () => {
@@ -276,10 +367,10 @@ const ChatDetailScreen = () => {
             message.timestamp = data.createdAt ? new Date(data.createdAt).getTime() : Date.now();
           });
         });
-        console.log('[ChatDetailScreen] New message saved to local');
+        logger.debug('ChatDetailScreen', 'New message saved to local');
       }
     } catch (error) {
-      console.error('[ChatDetailScreen] Save message to local failed:', error);
+      logger.error('ChatDetailScreen', 'Save message to local failed:', error);
     }
   }, [database, conversationId, chatId]);
 
@@ -288,11 +379,11 @@ const ChatDetailScreen = () => {
     try {
       const token = await getAuthToken();
       if (!token) {
-        console.log('[ChatDetailScreen] No token, skip ack');
+        logger.warn('ChatDetailScreen', 'No token, skip ack');
         return;
       }
 
-      console.log('[ChatDetailScreen] Acking messages, minMsgId:', minMsgId);
+      logger.debug('ChatDetailScreen', 'Acking messages, minMsgId:', minMsgId);
 
       const response = await fetch(`${API_CONFIG.BASE_URL}/api/chats/messages/ack`, {
         method: 'POST',
@@ -309,208 +400,160 @@ const ChatDetailScreen = () => {
       const data: any = await response.json();
 
       if (response.ok && data.success) {
-        console.log('[ChatDetailScreen] Acked messages, minMsgId:', minMsgId);
-        console.log('[ChatDetailScreen] Acknowledged messages, unread count updated on server');
+        logger.debug('ChatDetailScreen', 'Acked messages, minMsgId:', minMsgId);
+        logger.debug('ChatDetailScreen', 'Acknowledged messages, unread count updated on server');
       } else {
-        console.error('[ChatDetailScreen] Ack failed:', data.error);
+        logger.error('ChatDetailScreen', 'Ack failed:', data.error);
       }
     } catch (error: any) {
-      console.error('[ChatDetailScreen] Ack error:', error.message);
+      logger.error('ChatDetailScreen', 'Ack error:', error.message);
     }
   }, [conversationId, database]);
 
-  // Sync messages from server
+  // Sync messages from server - batch load all unread messages
   const syncMessagesFromServer = React.useCallback(async () => {
+    logger.debug('ChatDetailScreen', '=== syncMessagesFromServer START ===');
     try {
       const token = await getAuthToken();
       if (!token) {
-        console.log('[ChatDetailScreen] No token, skip sync');
+        logger.warn('ChatDetailScreen', 'No token, skip sync');
         return;
       }
 
-      const url = `${API_CONFIG.BASE_URL}/api/chats/messages/sync?conversationId=${conversationId}&chatType=${chatType}`;
+      // Step 1: Batch fetch all messages to get all sender IDs
+      logger.debug('ChatDetailScreen', 'Step 1: Fetching all messages in batches');
+      let hasMore = true;
+      let afterMsgId: string | undefined = undefined;
+      const batchSize = 1000; // Messages per batch
+      const allMessages: any[] = [];
+      const allSenderIds = new Set<string>();
 
-      console.log('[ChatDetailScreen] Syncing messages from server:', url);
+      while (hasMore) {
+        const url = `${API_CONFIG.BASE_URL}/api/chats/messages/sync?` +
+          `conversationId=${conversationId}&` +
+          `chatType=${chatType}&` +
+          `limit=${batchSize}` +
+          (afterMsgId ? `&afterMsgId=${afterMsgId}` : '');
 
-      const response = await fetch(url, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
+        logger.debug('ChatDetailScreen', 'Fetching batch, afterMsgId:', afterMsgId);
 
-      const data: any = await response.json();
+        const response = await fetch(url, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-      if (response.ok && data.success) {
-        console.log('[ChatDetailScreen] Synced', data.data.messages.length, 'messages');
-        console.log('[ChatDetailScreen] Sync response:', JSON.stringify(data.data));
+        const data: any = await response.json();
 
-        // Clear local unread count first
-        if (database) {
-          try {
-            const conversations = await database.collections
-              .get<Conversation>('conversations')
-              .query(Q.where('conversation_id', Q.eq(conversationId)))
-              .fetch();
+        if (!response.ok || !data.success) {
+          logger.error('ChatDetailScreen', 'Failed to fetch messages:', data.error);
+          hasMore = false;
+          continue;
+        }
 
-            if (conversations.length > 0) {
-              await database.write(async () => {
-                await conversations[0].update((c: Conversation) => {
-                  c.unreadCount = 0;
-                  c.updatedAt = Date.now();
+        logger.debug('ChatDetailScreen', 'Batch fetched:', data.data.messages.length, 'messages, hasMore:', data.data.hasMore);
+
+        // Collect messages and sender IDs
+        if (data.data.messages.length > 0) {
+          allMessages.push(...data.data.messages);
+          data.data.messages.forEach((m: any) => {
+            if (m.senderId) allSenderIds.add(m.senderId as string);
+          });
+          afterMsgId = data.data.latestMsgId;
+          hasMore = data.data.hasMore;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      logger.debug('ChatDetailScreen', 'All messages fetched:', allMessages.length, 'total, senders:', allSenderIds.size);
+
+      // Step 2: For group chat, sync group members BEFORE saving messages
+      if (chatType === 'group' && allSenderIds.size > 0) {
+        const senderIdsArray = Array.from(allSenderIds);
+        logger.debug('ChatDetailScreen', 'Step 2: Syncing group members, userIds:', senderIdsArray);
+        await syncGroupMembers(chatId, senderIdsArray);
+        logger.debug('ChatDetailScreen', 'Group members synced');
+      }
+
+      // Step 3: Save all messages to local database
+      if (allMessages.length > 0) {
+        logger.debug('ChatDetailScreen', 'Step 3: Saving', allMessages.length, 'messages to local');
+        await database.write(async () => {
+          for (const msg of allMessages) {
+            try {
+              const existing = await database.collections
+                .get<Message>('messages')
+                .query(Q.where('msg_id', Q.eq(msg.msgId)))
+                .fetch();
+
+              if (existing.length === 0) {
+                await database.collections.get<Message>('messages').create((message: any) => {
+                  message.msgId = msg.msgId;
+                  message.conversationId = msg.conversationId || conversationId;
+                  message.chatType = msg.chatType || 'direct';
+                  message.targetId = msg.targetId;
+                  message.text = msg.text;
+                  message.senderId = msg.senderId;
+                  message.chatSessionId = msg.senderId;
+                  message.status = msg.status;
+                  message.timestamp = new Date(msg.createdAt).getTime();
                 });
+                logger.debug('ChatDetailScreen', 'Saved message:', msg.msgId);
+              } else {
+                logger.debug('ChatDetailScreen', 'Message exists, skip:', msg.msgId);
+              }
+            } catch (e) {
+              logger.debug('ChatDetailScreen', 'Save message error:', msg.msgId, e);
+            }
+          }
+        });
+        logger.debug('ChatDetailScreen', 'All messages saved');
+
+        // Step 4: Acknowledge messages
+        const lastMsgId = allMessages[allMessages.length - 1]?.msgId;
+        if (lastMsgId) {
+          logger.debug('ChatDetailScreen', 'Step 4: Calling ackMessages with:', lastMsgId);
+          await ackMessages(lastMsgId);
+
+          // Clear local unread count
+          const conversations = await database.collections
+            .get<Conversation>('conversations')
+            .query(Q.where('conversation_id', Q.eq(conversationId)))
+            .fetch();
+
+          if (conversations.length > 0) {
+            await database.write(async () => {
+              await conversations[0].update((c: Conversation) => {
+                c.unreadCount = 0;
+                c.updatedAt = Date.now();
               });
-              console.log('[ChatDetailScreen] Local unread count cleared');
-            }
-          } catch (e) {
-            console.error('[ChatDetailScreen] Clear local unread count error:', e);
+            });
+            logger.debug('ChatDetailScreen', 'Local unread count cleared');
           }
-        }
 
-        // Save messages to local database
-        if (data.data.messages.length > 0) {
-          await database.write(async () => {
-            for (const msg of data.data.messages) {
-              try {
-                // Check if message already exists
-                const existing = await database.collections
-                  .get<Message>('messages')
-                  .query(Q.where('msg_id', Q.eq(msg.msgId)))
-                  .fetch();
-
-                if (existing.length === 0) {
-                  // Create new message
-                  await database.collections.get<Message>('messages').create((message: any) => {
-                    message.msgId = msg.msgId;
-                    message.conversationId = msg.conversationId || conversationId;
-                    message.chatType = msg.chatType || 'direct';
-                    message.targetId = msg.targetId;
-                    message.text = msg.text;
-                    message.senderId = msg.senderId;
-                    message.chatSessionId = msg.senderId;
-                    message.status = msg.status;
-                    message.timestamp = new Date(msg.createdAt).getTime();
-                  });
-                  console.log('[ChatDetailScreen] Saved message to local:', msg.msgId);
-                } else {
-                  console.log('[ChatDetailScreen] Message already exists, skip:', msg.msgId);
-                }
-              } catch (e) {
-                console.log('[ChatDetailScreen] Save message error:', msg.msgId, e);
-              }
-            }
-          });
-          console.log('[ChatDetailScreen] All messages saved to local');
-
-          // Acknowledge messages immediately after saving
-          const minMsgId = data.data.messages[0]?.msgId; // First message (oldest)
-          if (minMsgId) {
-            console.log('[ChatDetailScreen] Calling ackMessages with minMsgId:', minMsgId);
-            await ackMessages(minMsgId);
-          }
-        } else {
-          console.log('[ChatDetailScreen] No messages to sync');
+          logger.debug('ChatDetailScreen', 'ackMessages completed');
         }
       } else {
-        console.error('[ChatDetailScreen] Sync failed:', data.error);
+        logger.debug('ChatDetailScreen', 'No messages to sync');
       }
     } catch (error: any) {
-      console.error('[ChatDetailScreen] Sync error:', error.message);
-    }
-  }, [conversationId, chatType, database, ackMessages]);
-
-  // Load more history messages
-  const handleLoadMore = React.useCallback(async () => {
-    if (isSyncing || !hasMore) {
-      console.log('[ChatDetailScreen] Skip load more: isSyncing=', isSyncing, 'hasMore=', hasMore);
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      // Get the earliest message (last in the inverted list)
-      const earliestMsg = messages[messages.length - 1];
-      console.log('[ChatDetailScreen] Loading history messages, earliestMsgId:', earliestMsg?.msgId);
-
-      const token = await getAuthToken();
-      if (!token) {
-        console.log('[ChatDetailScreen] No token, skip load more');
-        return;
-      }
-
-      const url = `${API_CONFIG.BASE_URL}/api/chats/messages/history?conversationId=${conversationId}&chatType=${chatType}&beforeMsgId=${earliestMsg?.msgId || ''}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const data: any = await response.json();
-
-      if (response.ok && data.success) {
-        console.log('[ChatDetailScreen] Loaded', data.data.messages.length, 'history messages');
-
-        if (data.data.messages.length > 0) {
-          await database.write(async () => {
-            for (const msg of data.data.messages) {
-              try {
-                // Check if message already exists
-                const existing = await database.collections
-                  .get<Message>('messages')
-                  .query(Q.where('msg_id', Q.eq(msg.msgId)))
-                  .fetch();
-
-                if (existing.length === 0) {
-                  // Create new message
-                  await database.collections.get<Message>('messages').create((message: any) => {
-                    message.msgId = msg.msgId;
-                    message.conversationId = msg.conversationId || conversationId;
-                    message.chatType = msg.chatType || 'direct';
-                    message.targetId = msg.targetId;
-                    message.text = msg.text;
-                    message.senderId = msg.senderId;
-                    message.chatSessionId = msg.senderId;
-                    message.status = msg.status;
-                    message.timestamp = new Date(msg.createdAt).getTime();
-                  });
-                  console.log('[ChatDetailScreen] Saved history message to local:', msg.msgId);
-                } else {
-                  console.log('[ChatDetailScreen] History message already exists, skip:', msg.msgId);
-                }
-              } catch (e) {
-                console.log('[ChatDetailScreen] Save history message error:', msg.msgId, e);
-              }
-            }
-          });
-
-          // If loaded messages < limit, no more messages
-          if (data.data.messages.length < 50) {
-            setHasMore(false);
-          }
-        } else {
-          setHasMore(false);
-        }
-      } else {
-        console.error('[ChatDetailScreen] Load history failed:', data.error);
-      }
-    } catch (error: any) {
-      console.error('[ChatDetailScreen] Load history error:', error.message);
+      logger.error('ChatDetailScreen', 'Sync error:', error.message);
     } finally {
-      setIsSyncing(false);
+      logger.debug('ChatDetailScreen', '=== syncMessagesFromServer END ===');
     }
-  }, [messages, isSyncing, hasMore, conversationId, chatType, database]);
+  }, [conversationId, chatType, chatId, database, ackMessages, syncGroupMembers]);
 
   // Listen for message_sent event and update local message status
   const handleMessageSent = React.useCallback((data: WebSocketMessageData) => {
-    console.log('[ChatDetailScreen] Received message_sent event:', JSON.stringify(data));
+    logger.debug('ChatDetailScreen', 'Received message_sent event:', JSON.stringify(data));
 
     // Find the local message by msgId and update status
     const updateLocalMessage = async () => {
       try {
         if (!database || !data.msgId) {
-          console.log('[ChatDetailScreen] No database or msgId, skipping update');
+          logger.warn('ChatDetailScreen', 'No database or msgId, skipping update');
           return;
         }
 
@@ -520,16 +563,16 @@ const ChatDetailScreen = () => {
           .query(Q.where('msg_id', Q.eq(data.msgId)))
           .fetch();
 
-        console.log('[ChatDetailScreen] Found', messages.length, 'local messages with msgId:', data.msgId);
-        console.log('[ChatDetailScreen] Current status:', messages[0]?.status);
+        logger.debug('ChatDetailScreen', 'Found', messages.length, 'local messages with msgId:', data.msgId);
+        logger.debug('ChatDetailScreen', 'Current status:', messages[0]?.status);
 
         if (messages.length > 0) {
           await database.write(async () => {
             await messages[0].update((m: Message) => {
               m.status = 'sent';
-              console.log('[ChatDetailScreen] Updating message status to: sent');
+              logger.debug('ChatDetailScreen', 'Updating message status to: sent');
             });
-            console.log('[ChatDetailScreen] Message update completed in database.write');
+            logger.debug('ChatDetailScreen', 'Message update completed in database.write');
 
             // Update Conversation's latest message info
             const conversations = await database.collections
@@ -544,10 +587,10 @@ const ChatDetailScreen = () => {
                 c.latestSenderId = data.senderId || 'unknown';
                 c.updatedAt = Date.now();
               });
-              console.log('[ChatDetailScreen] Updated Conversation latest message');
+              logger.debug('ChatDetailScreen', 'Updated Conversation latest message');
             }
           });
-          console.log('[ChatDetailScreen] Database write completed');
+          logger.debug('ChatDetailScreen', 'Database write completed');
 
           // Manually update UI state to reflect the status change
           setMessages(prevMessages =>
@@ -557,8 +600,8 @@ const ChatDetailScreen = () => {
                 : msg
             )
           );
-          console.log('[ChatDetailScreen] UI state updated');
-          
+          logger.debug('ChatDetailScreen', 'UI state updated');
+
           // Clear the sending timeout
           if (data.msgId && sendingTimeouts.current.has(data.msgId)) {
             const timeout = sendingTimeouts.current.get(data.msgId);
@@ -568,10 +611,10 @@ const ChatDetailScreen = () => {
             }
           }
         } else {
-          console.log('[ChatDetailScreen] No local message found with msgId:', data.msgId);
+          logger.debug('ChatDetailScreen', 'No local message found with msgId:', data.msgId);
         }
       } catch (error) {
-        console.error('[ChatDetailScreen] Update local message error:', error);
+        logger.error('ChatDetailScreen', 'Update local message error:', error);
       }
     };
 
@@ -583,11 +626,11 @@ const ChatDetailScreen = () => {
     const fetchMessages = async () => {
       try {
         if (!database) {
-          console.error('Database is not available');
+          logger.error('ChatDetailScreen', 'Database is not available');
           return;
         }
 
-        console.log('[ChatDetailScreen] Fetching messages for conversationId:', conversationId);
+        logger.debug('ChatDetailScreen', 'Fetching messages for conversationId:', conversationId);
 
         const dbMessages = await database.collections
           .get<Message>('messages')
@@ -597,11 +640,19 @@ const ChatDetailScreen = () => {
           )
           .fetch();
 
-        console.log('[ChatDetailScreen] Fetched', dbMessages.length, 'messages');
+        logger.debug('ChatDetailScreen', 'Fetched', dbMessages.length, 'messages');
+        logger.debug('ChatDetailScreen', 'Fetched messages details:', dbMessages.map(m => ({
+          id: m.id,
+          msgId: m.msgId,
+          text: m.text,
+          status: m.status,
+          timestamp: m.timestamp
+        })));
 
         // Get all unique sender IDs
         const senderIds = [...new Set(dbMessages.map(msg => msg.senderId).filter(Boolean))];
-        
+        logger.debug('ChatDetailScreen', 'Unique senderIds:', senderIds);
+
         // Query friend/users info for avatars
         let friendAvatars: Map<string, string> = new Map();
         if (senderIds.length > 0 && chatType === 'direct') {
@@ -612,32 +663,53 @@ const ChatDetailScreen = () => {
               .get<Friend>('friends')
               .query(Q.where('friend_id', Q.eq(otherUserId)))
               .fetch();
-            
+
             friends.forEach(f => {
               friendAvatars.set(f.friendId, f.avatarUrl || '');
             });
           }
         } else if (senderIds.length > 0 && chatType === 'group') {
-          // For group chat, query all senders' info
-          const friends = await database.collections
-            .get<Friend>('friends')
-            .query()
+          // For group chat, query group members info
+          logger.debug('ChatDetailScreen', '[Group] Querying group_members for groupId:', chatId);
+
+          const groupMembers = await database.collections
+            .get<GroupMember>('group_members')
+            .query(Q.where('group_id', Q.eq(chatId)))
             .fetch();
-          
-          friends.forEach(f => {
-            friendAvatars.set(f.friendId, f.avatarUrl || '');
+
+          logger.debug('ChatDetailScreen', '[Group] Found', groupMembers.length, 'group members');
+          logger.debug('ChatDetailScreen', '[Group] Group members details:', groupMembers.map(m => ({
+            userId: m.userId,
+            name: m.name,
+            avatarUrl: m.avatarUrl,
+            role: m.role,
+          })));
+
+          groupMembers.forEach(m => {
+            friendAvatars.set(m.userId, m.avatarUrl || '');
           });
+
+          // Also add current user's avatar
+          if (user?.id) {
+            friendAvatars.set(user.id, user.avatarUrl || '');
+            logger.debug('ChatDetailScreen', '[Group] Added current user avatar:', user.id, user.avatarUrl);
+          }
+
+          logger.debug('ChatDetailScreen', '[Group] Final friendAvatars size:', friendAvatars.size);
+        } else {
+          logger.debug('ChatDetailScreen', 'Skip avatar query: senderIds.length=', senderIds.length, 'chatType=', chatType);
         }
 
         // Store in ref for use in subscription callback
         friendAvatarsRef.current = friendAvatars;
+        logger.debug('ChatDetailScreen', 'Stored friendAvatars to ref, size:', friendAvatars.size);
 
         // Convert database records to the format expected by the UI
         const formattedMessages = dbMessages.map(msg => {
           const isMe = msg.senderId === user?.id;
           const sender: 'me' | 'other' = isMe ? 'me' : 'other';
           const senderAvatar = isMe ? user?.avatarUrl : (friendAvatars.get(msg.senderId) || '');
-          
+
           return {
             id: msg.id,
             msgId: msg.msgId,
@@ -652,7 +724,7 @@ const ChatDetailScreen = () => {
 
         setMessages(formattedMessages);
       } catch (error) {
-        console.error('Error fetching messages:', error);
+        logger.error('ChatDetailScreen', 'Error fetching messages:', error);
       } finally {
         setLoading(false);
       }
@@ -662,7 +734,7 @@ const ChatDetailScreen = () => {
       fetchMessages();
 
       // Join chat room to receive real-time messages
-      console.log('[ChatDetailScreen] Joining chat room:', conversationId);
+      logger.debug('ChatDetailScreen', 'Joining chat room:', conversationId);
       joinChat(conversationId);
 
       // Set up a subscription to listen for changes in the database using conversationId
@@ -673,8 +745,40 @@ const ChatDetailScreen = () => {
           Q.sortBy('timestamp', Q.desc)
         )
         .observe()
-        .subscribe((dbMessages) => {
-          console.log('[ChatDetailScreen] Database subscription triggered:', dbMessages.length, 'messages');
+        .subscribe(async (dbMessages) => {
+          logger.debug('ChatDetailScreen', 'Database subscription triggered:', dbMessages.length, 'messages');
+          logger.debug('ChatDetailScreen', 'Database subscription messages details:', dbMessages.map(m => ({
+            id: m.id,
+            msgId: m.msgId,
+            text: m.text,
+            status: m.status,
+            timestamp: m.timestamp
+          })));
+
+          // Ensure friendAvatarsRef is populated (in case subscription fires before fetchMessages completes)
+          // For group chat, always re-fetch group members to ensure we have the latest avatars
+          if (chatType === 'group') {
+            logger.debug('ChatDetailScreen', '[Subscription] Refilling friendAvatarsRef from group_members, chatId:', chatId);
+
+            const groupMembers = await database.collections
+              .get<GroupMember>('group_members')
+              .query(Q.where('group_id', Q.eq(chatId)))
+              .fetch();
+
+            logger.debug('ChatDetailScreen', '[Subscription] Found', groupMembers.length, 'group members');
+
+            // Clear and refill the map
+            friendAvatarsRef.current.clear();
+            groupMembers.forEach(m => {
+              friendAvatarsRef.current.set(m.userId, m.avatarUrl || '');
+            });
+
+            if (user?.id) {
+              friendAvatarsRef.current.set(user.id, user.avatarUrl || '');
+            }
+
+            logger.debug('ChatDetailScreen', '[Subscription] friendAvatarsRef after refill:', friendAvatarsRef.current.size, 'entries');
+          }
 
           const formattedMessages = dbMessages.map(msg => {
             const isMe = msg.senderId === user?.id;
@@ -695,12 +799,14 @@ const ChatDetailScreen = () => {
             };
           });
 
+          logger.debug('ChatDetailScreen', '[Subscription] Setting messages to state, count:', formattedMessages.length);
+
           setMessages(formattedMessages);
         });
 
       // Listen for incoming messages from WebSocket
       const unsubscribeMessage = onMessage((data: any) => {
-        console.log('[ChatDetailScreen] Received message from WebSocket:', data);
+        logger.info('ChatDetailScreen', 'Received message from WebSocket:', data);
         saveMessageToLocal(data);
 
         // Update latest msgId if this message is newer
@@ -713,7 +819,13 @@ const ChatDetailScreen = () => {
       const unsubscribeMessageSent = onMessageSent(handleMessageSent);
 
       // Sync messages from server on mount
+      logger.debug('ChatDetailScreen', 'Calling syncMessagesFromServer on mount');
       syncMessagesFromServer();
+
+      // For direct chat, sync user info
+      if (chatType === 'direct') {
+        syncUserInfo(chatId);
+      }
 
       // Sync conversation info (to update friend/group info)
       syncConversationInfo();
@@ -735,12 +847,12 @@ const ChatDetailScreen = () => {
   }, [database, conversationId, onMessage, handleMessageSent, syncMessagesFromServer, joinChat, leaveChat, syncConversationInfo]);
 
   const handleSendMessage = async () => {
-    console.log('[ChatDetailScreen] handleSendMessage called');
-    console.log('[ChatDetailScreen] inputText:', inputText);
-    console.log('[ChatDetailScreen] conversationId:', conversationId);
+    logger.debug('ChatDetailScreen', 'handleSendMessage called');
+    logger.debug('ChatDetailScreen', 'inputText:', inputText);
+    logger.debug('ChatDetailScreen', 'conversationId:', conversationId);
 
     if (inputText.trim() === '' || !database) {
-      console.log('[ChatDetailScreen] Skipping send: empty text or no database');
+      logger.warn('ChatDetailScreen', 'Skipping send: empty text or no database');
       return;
     }
 
@@ -759,7 +871,7 @@ const ChatDetailScreen = () => {
         await database.collections.get<Message>('messages').create((message: any) => {
           message.msgId = msgId;
           message.conversationId = conversationId;
-          message.chatType = 'direct';
+          message.chatType = chatType; // Use the actual chat type
           message.targetId = chatId;
           message.text = inputText;
           message.senderId = currentUserId;
@@ -788,7 +900,7 @@ const ChatDetailScreen = () => {
         } else {
           await database.collections.get<Conversation>('conversations').create((c: Conversation) => {
             c.conversationId = conversationId;
-            c.type = 'direct';
+            c.type = chatType; // Use the actual chat type
             c.targetId = chatId;
             c.latestMsgId = msgId;
             c.latestSummary = inputText;
@@ -800,15 +912,15 @@ const ChatDetailScreen = () => {
           });
         }
       });
-      console.log('[ChatDetailScreen] Message saved to local with sending status, conversation updated');
+      logger.debug('ChatDetailScreen', 'Message saved to local with sending status, conversation updated');
 
       // 2. 通过 WebSocket 发送消息到后端（带上 msgId 和 chatType）
-      console.log('[ChatDetailScreen] Calling sendMessage via WebSocket with msgId:', msgId);
-      sendMessage(conversationId, inputText, 'text', msgId, 'direct');
+      logger.debug('ChatDetailScreen', 'Calling sendMessage via WebSocket with msgId:', msgId);
+      sendMessage(conversationId, inputText, 'text', msgId, chatType);
 
       // 设置超时定时器
       const timeout = setTimeout(() => {
-        console.log('[ChatDetailScreen] Message sending timeout:', msgId);
+        logger.warn('ChatDetailScreen', 'Message sending timeout:', msgId);
         // Update message status to failed
         setMessages(prev =>
           prev.map(msg =>
@@ -817,20 +929,20 @@ const ChatDetailScreen = () => {
         );
         sendingTimeouts.current.delete(msgId);
       }, SENDING_TIMEOUT);
-      
+
       sendingTimeouts.current.set(msgId, timeout);
 
       // Clear the input
       setInputText('');
     } catch (error) {
-      console.error('[ChatDetailScreen] Error sending message:', error);
+      logger.error('ChatDetailScreen', 'Error sending message:', error);
     }
   };
 
   // 重发消息
   const handleRetryMessage = async (message: MessageInterface) => {
-    console.log('[ChatDetailScreen] Retrying message:', message.msgId);
-    
+    logger.debug('ChatDetailScreen', 'Retrying message:', message.msgId);
+
     if (!message.text || !database) return;
 
     try {
@@ -866,11 +978,11 @@ const ChatDetailScreen = () => {
       );
 
       // 通过 WebSocket 重新发送
-      sendMessage(conversationId, message.text, 'text', newMsgId, 'direct');
+      sendMessage(conversationId, message.text, 'text', newMsgId, chatType);
 
       // 设置新的超时定时器
       const timeout = setTimeout(() => {
-        console.log('[ChatDetailScreen] Retry message timeout:', newMsgId);
+        logger.warn('ChatDetailScreen', 'Retry message timeout:', newMsgId);
         setMessages(prev =>
           prev.map(msg =>
             msg.msgId === newMsgId ? { ...msg, sending: false, failed: true } : msg
@@ -881,7 +993,7 @@ const ChatDetailScreen = () => {
 
       sendingTimeouts.current.set(newMsgId, timeout);
     } catch (error) {
-      console.error('[ChatDetailScreen] Retry message error:', error);
+      logger.error('ChatDetailScreen', 'Retry message error:', error);
     }
   };
 
@@ -898,19 +1010,71 @@ const ChatDetailScreen = () => {
     if (!database) return;
 
     try {
+      // 生成消息 ID
+      const msgId = generateMsgId();
+      const timestamp = Date.now();
+
+      logger.debug('ChatDetailScreen', 'handleAcceptTranslation called with text:', selectedText);
+      logger.debug('ChatDetailScreen', 'Generated msgId:', msgId);
+      logger.debug('ChatDetailScreen', 'conversationId:', conversationId);
+      logger.debug('ChatDetailScreen', 'chatType:', chatType);
+
       // 使用选中的翻译结果作为消息发送
       const newMessage = await database.write(async () => {
         return database.collections.get<Message>('messages').create(message => {
           message.text = selectedText;
           message.senderId = user?.id || '';
           message.chatSessionId = chatId;
-          message.status = 'sent';
-          message.timestamp = Date.now();
+          message.status = 'sending'; // Set to sending initially
+          message.msgId = msgId; // Use the same msgId for local tracking
+          message.timestamp = timestamp;
+          message.conversationId = conversationId; // Ensure conversationId is set
+          message.chatType = chatType; // Ensure chatType is set
+          message.targetId = chatId; // Ensure targetId is set
         });
       });
 
+      logger.debug('ChatDetailScreen', 'Message created in database:', {
+        id: newMessage.id,
+        msgId: newMessage.msgId,
+        text: newMessage.text,
+        conversationId: newMessage.conversationId,
+        status: newMessage.status
+      });
+
+      // Update conversation with latest message info
+      await database.write(async () => {
+        const existingConversations = await database.collections
+          .get<Conversation>('conversations')
+          .query(Q.where('conversation_id', Q.eq(conversationId)))
+          .fetch();
+
+        if (existingConversations.length > 0) {
+          await existingConversations[0].update((c: Conversation) => {
+            c.latestMsgId = msgId;
+            c.latestSummary = selectedText;
+            c.latestSenderId = user?.id || '';
+            c.latestTimestamp = timestamp;
+            c.updatedAt = timestamp;
+          });
+        } else {
+          await database.collections.get<Conversation>('conversations').create((c: Conversation) => {
+            c.conversationId = conversationId;
+            c.type = chatType;
+            c.targetId = chatId;
+            c.latestMsgId = msgId;
+            c.latestSummary = selectedText;
+            c.latestSenderId = user?.id || '';
+            c.latestTimestamp = timestamp;
+            c.unreadCount = 0;
+            c.createdAt = timestamp;
+            c.updatedAt = timestamp;
+          });
+        }
+      });
+
       // 通过 WebSocket 发送消息到后端
-      const msgId = generateMsgId();
+      logger.debug('ChatDetailScreen', 'Calling sendMessage via WebSocket with msgId:', msgId);
       sendMessage(conversationId, selectedText, 'text', msgId, chatType);
 
       // 清空输入框
@@ -918,7 +1082,7 @@ const ChatDetailScreen = () => {
       // 关闭模态框
       setShowTranslationAssistant(false);
     } catch (error) {
-      console.error('Error sending translation:', error);
+      logger.error('ChatDetailScreen', 'Error sending translation:', error);
     }
   };
 
@@ -934,68 +1098,72 @@ const ChatDetailScreen = () => {
   }
 
   // 渲染单条消息的函数
-  const renderMessage = ({ item }: { item: MessageInterface }) => (
-    <View
-      style={[
-        styles.messageRow,
-        item.sender === 'me' ? styles.myMessageRow : styles.otherMessageRow
-      ]}
-    >
-      {/* Avatar for other's messages */}
-      {item.sender === 'other' && item.senderAvatar && (
-        <Image
-          source={{ uri: getAvatarUrl(item.senderAvatar, 40) }}
-          style={styles.messageAvatar}
-        />
-      )}
-
-      {/* Status indicator (loading or failed) */}
-      {item.sending && (
-        <View style={styles.statusContainer}>
-          <ActivityIndicator size="small" color="#999" />
-        </View>
-      )}
-      {item.failed && (
-        <TouchableOpacity
-          style={styles.statusContainer}
-          onPress={() => handleRetryMessage(item)}
-        >
-          <View style={styles.failedIcon}>
-            <Text style={styles.failedText}>!</Text>
-          </View>
-        </TouchableOpacity>
-      )}
-
-      {/* Message Bubble */}
+  const renderMessage = ({ item }: { item: MessageInterface }) => {
+    return (
       <View
         style={[
-          styles.messageBubble,
-          item.sender === 'me' ? styles.myMessage : styles.otherMessage,
-          item.failed && styles.failedMessage
+          styles.messageRow,
+          item.sender === 'me' ? styles.myMessageRow : styles.otherMessageRow
         ]}
       >
-        <View style={styles.messageContent}>
-          <Text style={[
-            styles.messageText,
-            styles.messageTextWrap,
-            item.sender === 'me' ? styles.myMessageText : styles.otherMessageText
-          ]}>
-            {item.text}
-          </Text>
-        </View>
-        {item.sending && <Text style={styles.messageStatus}>发送中...</Text>}
-        {item.failed && <Text style={styles.failedStatus}>点击重试</Text>}
-      </View>
+        {/* Avatar for other's messages */}
+        {item.sender === 'other' && item.senderAvatar && (
+          <Image
+            source={{ uri: getAvatarUrl(item.senderAvatar, 40) }}
+            style={styles.messageAvatar}
+            onError={(e) => logger.error('ChatDetailScreen', 'Avatar load error:', item.senderId, e.nativeEvent.error)}
+          />
+        )}
 
-      {/* Avatar for my messages */}
-      {item.sender === 'me' && item.senderAvatar && (
-        <Image
-          source={{ uri: getAvatarUrl(item.senderAvatar, 40) }}
-          style={styles.messageAvatar}
-        />
-      )}
-    </View>
-  );
+        {/* Status indicator (loading or failed) */}
+        {item.sending && (
+          <View style={styles.statusContainer}>
+            <ActivityIndicator size="small" color="#999" />
+          </View>
+        )}
+        {item.failed && (
+          <TouchableOpacity
+            style={styles.statusContainer}
+            onPress={() => handleRetryMessage(item)}
+          >
+            <View style={styles.failedIcon}>
+              <Text style={styles.failedText}>!</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Message Bubble */}
+        <View
+          style={[
+            styles.messageBubble,
+            item.sender === 'me' ? styles.myMessage : styles.otherMessage,
+            item.failed && styles.failedMessage
+          ]}
+        >
+          <View style={styles.messageContent}>
+            <Text style={[
+              styles.messageText,
+              styles.messageTextWrap,
+              item.sender === 'me' ? styles.myMessageText : styles.otherMessageText
+            ]}>
+              {item.text}
+            </Text>
+          </View>
+          {item.sending && <Text style={styles.messageStatus}>发送中...</Text>}
+          {item.failed && <Text style={styles.failedStatus}>点击重试</Text>}
+        </View>
+
+        {/* Avatar for my messages */}
+        {item.sender === 'me' && item.senderAvatar && (
+          <Image
+            source={{ uri: getAvatarUrl(item.senderAvatar, 40) }}
+            style={styles.messageAvatar}
+            onError={(e) => logger.error('ChatDetailScreen', 'My avatar load error:', user?.id, e.nativeEvent.error)}
+          />
+        )}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -1014,9 +1182,6 @@ const ChatDetailScreen = () => {
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={isSyncing ? <ActivityIndicator size="small" color="#999" /> : null}
           onContentSizeChange={() => {
             // 当内容改变时，自动滚动到底部（即最新消息，因为是inverted）
             const scrollRef = scrollViewRef.current;

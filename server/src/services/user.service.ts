@@ -182,6 +182,54 @@ class UserService {
       throw error;
     }
   }
+
+  /**
+   * Get user by ID (simplified for chat sync)
+   */
+  async getUserById(userId: string) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatarUrl: true,
+        },
+      });
+
+      return user;
+    } catch (error: any) {
+      logger.error('[UserService] Get user by ID error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get users by IDs (batch)
+   */
+  async getUsersByIds(userIds: string[]) {
+    try {
+      const users = await prisma.user.findMany({
+        where: {
+          id: {
+            in: userIds,
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatarUrl: true,
+        },
+      });
+
+      return users;
+    } catch (error: any) {
+      logger.error('[UserService] Get users by IDs error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new UserService();

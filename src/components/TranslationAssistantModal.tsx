@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { Suggestion, streamAnalyze, ContextMessage } from '../api/assistant';
+import logger from '../utils/logger';
 
 interface TranslationAssistantModalProps {
   visible: boolean;
@@ -71,7 +72,7 @@ const TranslationAssistantModal: React.FC<TranslationAssistantModalProps> = ({
 
     const streamHandle = streamAnalyze(request, {
       onStart: () => {
-        console.log('[TranslationAssistantModal] Stream started');
+        logger.debug('TranslationAssistantModal', 'Stream started');
       },
       onText: (text: string) => {
         setMainContent(prev => prev + text);
@@ -90,12 +91,12 @@ const TranslationAssistantModal: React.FC<TranslationAssistantModalProps> = ({
         });
       },
       onDone: (fullContent: string, allSuggestions: { text: string; highlight: string }[]) => {
-        console.log('[TranslationAssistantModal] Stream completed');
+        logger.debug('TranslationAssistantModal', 'Stream completed');
         // Ensure loading is stopped when stream is done
         setIsLoading(false);
       },
       onError: (error: string) => {
-        console.error('[TranslationAssistantModal] Stream error:', error);
+        logger.error('TranslationAssistantModal', 'Stream error:', error);
         setStreamError(error);
         setIsLoading(false);
       },
@@ -108,10 +109,12 @@ const TranslationAssistantModal: React.FC<TranslationAssistantModalProps> = ({
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
+    logger.debug('TranslationAssistantModal', 'Selecting suggestion:', suggestion);
     setSelectedSuggestion(suggestion);
   };
 
   const handleAccept = () => {
+    logger.info('TranslationAssistantModal', 'Accepting suggestion:', selectedSuggestion);
     if (selectedSuggestion) {
       onAccept(selectedSuggestion);
       onClose();
@@ -203,7 +206,10 @@ const TranslationAssistantModal: React.FC<TranslationAssistantModalProps> = ({
                         styles.suggestionItem,
                         selectedSuggestion === suggestion.text && styles.selectedSuggestion
                       ]}
-                      onPress={() => handleSuggestionSelect(suggestion.text)}
+                      onPress={() => {
+                        logger.debug('TranslationAssistantModal', 'Suggestion item pressed:', suggestion.text, 'at index:', index);
+                        handleSuggestionSelect(suggestion.text);
+                      }}
                     >
                       <Text style={styles.suggestionText}>👉 {suggestion.text}</Text>
                       {suggestion.highlight ? (

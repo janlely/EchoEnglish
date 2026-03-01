@@ -148,6 +148,10 @@ class MessageService {
             groupId: conversationId.replace('group_', ''),
             userId: { not: senderId },
           },
+          select: {
+            userId: true,
+          },
+          distinct: ['userId'], // Ensure unique userIds
         });
 
         for (const participant of participants) {
@@ -576,9 +580,16 @@ class MessageService {
 
   /**
    * Sync messages for a conversation
-   * Returns messages after lastReadMsgId, ordered from old to new
+   * Returns messages after lastReadMsgId (or afterMsgId), ordered from old to new
+   * Supports batch loading with afterMsgId and limit parameters
    */
-  async syncMessages(currentUserId: string, conversationId: string, chatType: string, limit: number = 50) {
+  async syncMessages(
+    currentUserId: string,
+    conversationId: string,
+    chatType: string,
+    afterMsgId?: string,  // Optional: start from this msgId (for batch loading)
+    limit: number = 50
+  ) {
     try {
       // Verify permission
       const isGroup = isGroupConversation(conversationId);
@@ -610,27 +621,33 @@ class MessageService {
         }
       }
 
-      // Get user's lastReadMsgId
-      const state = await prisma.userConversationState.findUnique({
-        where: {
-          userId_conversationId: {
-            userId: currentUserId,
-            conversationId,
+      // Determine the starting msgId
+      // If afterMsgId is provided, use it; otherwise get from UserConversationState
+      let startMsgId = afterMsgId;
+      if (!startMsgId) {
+        const state = await prisma.userConversationState.findUnique({
+          where: {
+            userId_conversationId: {
+              userId: currentUserId,
+              conversationId,
+            },
           },
-        },
-      });
+        });
+        startMsgId = state?.lastReadMsgId || undefined;
+      }
 
-      const lastReadMsgId = state?.lastReadMsgId;
+      logger.info(`[MessageService] Sync query: conversationId=${conversationId}, startMsgId=${startMsgId || 'null'}, limit=${limit}`);
 
-      logger.info(`[MessageService] Sync query: conversationId=${conversationId}, lastReadMsgId=${lastReadMsgId || 'null'}`);
-
-      // Return messages after lastReadMsgId (from old to new)
-      // Only return messages sent by others (not by current user)
+      // Build query: get messages after startMsgId
       const where: any = {
         conversationId,
-        msgId: { gt: lastReadMsgId },
       };
-      
+
+      // Only add msgId filter if startMsgId exists
+      if (startMsgId) {
+        where.msgId = { gt: startMsgId };
+      }
+
       // Exclude messages sent by current user
       if (currentUserId) {
         where.senderId = { not: currentUserId };
@@ -669,8 +686,14 @@ class MessageService {
         createdAt: msg.createdAt,
       }));
 
+      // Determine if there are more messages
+      const hasMore = messages.length >= limit;
+      const latestMsgId = messages.length > 0 ? messages[messages.length - 1].msgId : undefined;
+
       return {
         messages: formattedMessages,
+        hasMore,
+        latestMsgId,
       };
     } catch (error: any) {
       logger.error('Sync messages error:', error);
@@ -779,98 +802,6 @@ class MessageService {
       return contextMessages;
     } catch (error: any) {
       logger.error('Get recent messages for context error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Sync history messages (older messages)
-   * Returns messages before the given beforeMsgId, ordered from new to old
-   */
-  async syncHistoryMessages(
-    currentUserId: string,
-    conversationId: string,
-    chatType: string,
-    beforeMsgId: string | null,
-    limit: number = 50
-  ) {
-    try {
-      // Verify permission (same as syncMessages)
-      const isGroup = isGroupConversation(conversationId);
-
-      if (isGroup) {
-        const groupId = conversationId.replace('group_', '');
-        const participant = await prisma.groupMember.findFirst({
-          where: { groupId, userId: currentUserId },
-        });
-        if (!participant) {
-          throw new Error('Access denied');
-        }
-      } else {
-        const otherUserId = getOtherUserIdFromConversationId(conversationId, currentUserId);
-        if (!otherUserId) {
-          throw new Error('Invalid conversation ID');
-        }
-
-        const friendship = await prisma.friendship.findFirst({
-          where: {
-            OR: [
-              { userId1: currentUserId, userId2: otherUserId },
-              { userId1: otherUserId, userId2: currentUserId },
-            ],
-          },
-        });
-        if (!friendship) {
-          throw new Error('Access denied');
-        }
-      }
-
-      logger.info(`[MessageService] Sync history: conversationId=${conversationId}, beforeMsgId=${beforeMsgId || 'null'}`);
-
-      // Return messages before beforeMsgId (from new to old)
-      // Only return messages sent by others (not by current user)
-      const messages = await prisma.message.findMany({
-        where: {
-          conversationId,
-          ...(beforeMsgId ? { msgId: { lt: beforeMsgId } } : {}),
-          senderId: { not: currentUserId }, // Exclude messages sent by current user
-        },
-        include: {
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      });
-
-      logger.info(`Sync ${messages.length} history messages for user ${currentUserId}, conversation ${conversationId}`);
-
-      const formattedMessages = messages.map(msg => ({
-        id: msg.id,
-        msgId: msg.msgId,
-        text: msg.text,
-        type: msg.type,
-        status: msg.status,
-        senderId: msg.senderId,
-        conversationId: msg.conversationId,
-        sender: msg.sender ? {
-          id: msg.sender.id,
-          name: msg.sender.name,
-          avatarUrl: msg.sender.avatarUrl,
-        } : null,
-        createdAt: msg.createdAt,
-      }));
-
-      return {
-        messages: formattedMessages,
-      };
-    } catch (error: any) {
-      logger.error('Sync history messages error:', error);
       throw error;
     }
   }

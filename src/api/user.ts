@@ -91,3 +91,27 @@ export const uploadAvatar = async (imageUri: string): Promise<{ avatarUrl: strin
     throw error;
   }
 };
+
+/**
+ * Get user by ID
+ */
+export const getUserInfo = async (userId: string): Promise<UserProfile> => {
+  const response = await ApiService.request<{ success: boolean; data: { user: UserProfile } }>(
+    `/api/users/${userId}`
+  );
+  return response.data!.user;
+};
+
+/**
+ * Get users by IDs (batch)
+ */
+export const getUsersBatch = async (userIds: string[]): Promise<UserProfile[]> => {
+  const response = await ApiService.request<{ success: boolean; data: { users: UserProfile[] } }>(
+    '/api/users/batch',
+    {
+      method: 'POST',
+      body: JSON.stringify({ userIds }),
+    }
+  );
+  return response.data!.users;
+};

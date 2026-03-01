@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
@@ -14,8 +15,9 @@ import { Conversation, Friend, Group } from '../database/models';
 import { MainScreenNavigationProp } from '../types/navigation';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { getConversationsWithUnread } from '../api/conversations';
-import { syncContacts } from '../api/contacts';
+import { syncContacts, getGroupInfo } from '../api/contacts';
 import { getAvatarUrl } from '../utils/avatar';
+import logger from '../utils/logger';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -83,6 +85,7 @@ const MainScreen = () => {
   const navigation = useNavigation<MainScreenNavigationProp>();
   const [chatSessions, setChatSessions] = useState<ChatSessionInterface[]>([]);
   const [loading, setLoading] = useState(true);
+  const [menuVisible, setMenuVisible] = useState(false);
   const database = useDatabase();
 
   /**
@@ -91,14 +94,6 @@ const MainScreen = () => {
   const syncConversations = React.useCallback(async () => {
     try {
       console.log('[MainScreen] Syncing conversations with unread from server...');
-      
-      // Sync contacts first (to ensure friends and groups are up to date)
-      try {
-        await syncContacts();
-        console.log('[MainScreen] Contacts synced');
-      } catch (error) {
-        console.error('[MainScreen] Sync contacts failed:', error);
-      }
 
       // Get conversations with unread messages
       const conversations = await getConversationsWithUnread();
@@ -138,6 +133,33 @@ const MainScreen = () => {
                 c.createdAt = Date.now();
                 c.updatedAt = Date.now();
               });
+            }
+
+            // For group chat, check if group info exists locally
+            if (conv.type === 'group') {
+              const existingGroups = await database.collections
+                .get<Group>('groups')
+                .query(Q.where('group_id', Q.eq(conv.targetId)))
+                .fetch();
+
+              if (existingGroups.length === 0) {
+                // Group info not found locally, fetch from server
+                try {
+                  const groupInfo = await getGroupInfo(conv.targetId);
+                  await database.collections.get<Group>('groups').create((g: Group) => {
+                    g.groupId = groupInfo.id;
+                    g.name = groupInfo.name;
+                    g.avatarUrl = groupInfo.avatarUrl || undefined;
+                    g.ownerId = groupInfo.ownerId;
+                    g.memberIds = JSON.stringify(groupInfo.members?.map(m => m.userId) || []);
+                    g.createdAt = Date.now();
+                    g.updatedAt = Date.now();
+                  });
+                  logger.debug('MainScreen', 'Fetched and saved group info:', groupInfo.id);
+                } catch (e) {
+                  logger.error('MainScreen', 'Failed to fetch group info:', conv.targetId, e);
+                }
+              }
             }
           } catch (e) {
             console.log('[MainScreen] Error updating conversation:', conv.conversationId, e);
@@ -192,13 +214,18 @@ const MainScreen = () => {
             }
           } else {
             // Get group info
+            logger.debug('MainScreen', 'Loading group info for targetId:', conv.targetId);
             const groups = await database.collections
               .get<Group>('groups')
               .query(Q.where('group_id', Q.eq(conv.targetId)))
               .fetch();
+            logger.debug('MainScreen', 'Found', groups.length, 'groups for targetId:', conv.targetId);
             if (groups.length > 0) {
               name = groups[0].name;
               avatar = groups[0].avatarUrl;
+              logger.debug('MainScreen', 'Group name:', name);
+            } else {
+              logger.warn('MainScreen', 'Group not found for targetId:', conv.targetId, 'conversationId:', conv.conversationId);
             }
           }
 
@@ -241,12 +268,14 @@ const MainScreen = () => {
         fontWeight: 'bold',
       },
       headerRight: () => (
-        <TouchableOpacity
-          style={{ paddingRight: 16 }}
-          onPress={() => navigation.navigate('SearchUser')}
-        >
-          <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#007AFF' }}>+</Text>
-        </TouchableOpacity>
+        <View style={{ position: 'relative' }}>
+          <TouchableOpacity
+            style={{ paddingRight: 16 }}
+            onPress={() => setMenuVisible(true)}
+          >
+            <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#007AFF' }}>+</Text>
+          </TouchableOpacity>
+        </View>
       ),
     });
   }, [navigation]);
@@ -311,13 +340,51 @@ const MainScreen = () => {
   }
 
   return (
-    <FlatList
-      data={chatSessions}
-      renderItem={renderChatItem}
-      keyExtractor={(item) => item.conversationId}
-      style={styles.listContainer}
-      showsVerticalScrollIndicator={false}
-    />
+    <View style={styles.container}>
+      <FlatList
+        data={chatSessions}
+        renderItem={renderChatItem}
+        keyExtractor={(item) => item.conversationId}
+        style={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+      />
+
+      {/* Menu Modal */}
+      <Modal
+        visible={menuVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setMenuVisible(false)}
+        >
+          <View style={styles.menuContainer}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate('SearchUser');
+              }}
+            >
+              <Text style={styles.menuItemText}>👤 添加好友</Text>
+            </TouchableOpacity>
+            <View style={styles.menuSeparator} />
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate('CreateGroupChat');
+              }}
+            >
+              <Text style={styles.menuItemText}>👥 创建群聊</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
   );
 };
 
@@ -406,6 +473,32 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+    paddingTop: 60,
+    paddingRight: 16,
+  },
+  menuContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    minWidth: 180,
+  },
+  menuItem: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#fff',
+  },
+  menuItemText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  menuSeparator: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
   },
 });
 

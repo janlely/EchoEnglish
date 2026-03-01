@@ -5,6 +5,7 @@ import MainTabNavigator from './MainTabNavigator';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import SearchUserScreen from '../screens/SearchUserScreen';
 import FriendRequestsScreen from '../screens/FriendRequestsScreen';
+import CreateGroupChatScreen from '../screens/CreateGroupChatScreen';
 
 const Stack = createStackNavigator();
 
@@ -15,8 +16,8 @@ const RootNavigator = () => {
         <Stack.Screen name="Main" component={MainTabNavigator} />
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
         <Stack.Screen name="SearchUser" component={SearchUserScreen} />
-        <Stack.Screen 
-          name="FriendRequests" 
+        <Stack.Screen
+          name="FriendRequests"
           component={FriendRequestsScreen}
           options={{
             headerShown: true,
@@ -28,6 +29,22 @@ const RootNavigator = () => {
               fontSize: 18,
               fontWeight: 'bold',
             },
+          }}
+        />
+        <Stack.Screen
+          name="CreateGroupChat"
+          component={CreateGroupChatScreen}
+          options={{
+            headerShown: true,
+            headerTitle: '创建群聊',
+            headerStyle: {
+              backgroundColor: '#f8f8f8',
+            },
+            headerTitleStyle: {
+              fontSize: 18,
+              fontWeight: 'bold',
+            },
+            headerBackTitle: '返回',
           }}
         />
       </Stack.Navigator>

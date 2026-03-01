@@ -136,12 +136,13 @@ class MessageController {
   }
 
   /**
-   * Sync messages - get messages after a specific msgId and mark them as read
+   * Sync messages - get messages after lastReadMsgId (or afterMsgId) and mark them as read
+   * Supports batch loading with afterMsgId and limit parameters
    */
   async syncMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id; // Current user ID
-      const { conversationId, chatType } = req.query;
+      const { conversationId, chatType, afterMsgId, limit } = req.query;
 
       if (!conversationId) {
         res.status(400).json({
@@ -155,10 +156,11 @@ class MessageController {
         userId,
         conversationId as string,
         (chatType as string) || 'direct',
-        50
+        afterMsgId as string,  // Optional: start from this msgId
+        limit ? parseInt(limit as string) : 50  // Optional: batch size
       );
 
-      logger.info(`Synced ${result.messages.length} messages for user ${userId}, conversation: ${conversationId}`);
+      logger.info(`Synced ${result.messages.length} messages for user ${userId}, conversation: ${conversationId}, hasMore: ${result.hasMore}`);
 
       res.status(200).json({
         success: true,
@@ -198,40 +200,6 @@ class MessageController {
       });
     } catch (error: any) {
       logger.error('Ack messages controller error:', error);
-      next(error);
-    }
-  }
-
-  /**
-   * Sync history messages
-   */
-  async syncHistoryMessages(req: AuthRequest, res: Response, next: NextFunction) {
-    try {
-      const userId = req.user!.id;
-      const { conversationId, chatType, beforeMsgId } = req.query;
-
-      if (!conversationId) {
-        res.status(400).json({
-          success: false,
-          error: 'conversationId is required',
-        });
-        return;
-      }
-
-      const result = await messageService.syncHistoryMessages(
-        userId,
-        conversationId as string,
-        (chatType as string) || 'direct',
-        beforeMsgId as string || null,
-        50
-      );
-
-      res.status(200).json({
-        success: true,
-        data: result,
-      });
-    } catch (error: any) {
-      logger.error('Sync history messages controller error:', error);
       next(error);
     }
   }

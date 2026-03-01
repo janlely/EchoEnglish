@@ -69,7 +69,6 @@ router.post('/conversations/:conversationId/messages/read', messageController.ma
 // Message sync routes (using conversationId in query params)
 router.get('/sessions/sync', messageController.syncSessions);
 router.get('/messages/sync', messageController.syncMessages);
-router.get('/messages/history', messageController.syncHistoryMessages);
 router.post('/messages/ack', messageController.ackMessages);
 
 // New conversation routes

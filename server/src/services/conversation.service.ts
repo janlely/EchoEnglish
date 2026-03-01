@@ -125,6 +125,7 @@ class ConversationService {
           type: 'group',
           targetId: groupId,
           unreadCount: 0,
+          lastReadMsgId: null, // Initialize as null, will be updated when user reads messages
         },
       });
 
@@ -151,8 +152,21 @@ class ConversationService {
       const isGroup = isGroupConversation(conversationId);
 
       if (isGroup) {
-        // 群聊：获取群信息和 Conversation 记录
+        // 群聊：获取群信息并验证用户是否是群成员
         const groupId = conversationId.replace('group_', '');
+        
+        // 验证用户是否是群成员
+        const membership = await prisma.groupMember.findFirst({
+          where: {
+            groupId,
+            userId,
+          },
+        });
+        
+        if (!membership) {
+          throw new Error('Access denied: User is not a member of this group');
+        }
+        
         const group = await prisma.group.findUnique({
           where: { id: groupId },
         });
@@ -164,16 +178,27 @@ class ConversationService {
         // 获取或创建 UserConversationState
         const state = await this.getOrCreateGroupConversationState(userId, groupId);
 
+        // Get the latest message ID from Conversation record (not from UserConversationState)
+        const conversation = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+          select: {
+            latestMsgId: true,
+            latestSummary: true,
+            latestSenderId: true,
+            latestTimestamp: true,
+          },
+        });
+
         return {
           conversationId,
           type: 'group',
           targetId: groupId,
           name: group.name,
           avatarUrl: group.avatarUrl,
-          latestMsgId: state.state.lastReadMsgId || undefined,
-          latestSummary: undefined,
-          latestSenderId: undefined,
-          latestTimestamp: undefined,
+          latestMsgId: conversation?.latestMsgId || undefined,
+          latestSummary: conversation?.latestSummary || undefined,
+          latestSenderId: conversation?.latestSenderId || undefined,
+          latestTimestamp: conversation?.latestTimestamp || undefined,
           unreadCount: state.state.unreadCount,
           lastReadMsgId: state.state.lastReadMsgId,
         };

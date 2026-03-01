@@ -270,22 +270,42 @@ class ContactService {
         },
       });
 
-      // 提取群组信息
+      // 提取群组信息（包含成员详情）
       const currentGroups = groupMemberships.map(m => ({
         id: m.group.id,
         name: m.group.name,
         avatarUrl: m.group.avatarUrl,
         ownerId: m.group.ownerId,
         memberIds: m.group.members.map(member => member.userId),
+        members: m.group.members.map(member => ({
+          userId: member.user.id,
+          name: member.user.name,
+          avatarUrl: member.user.avatarUrl,
+          role: member.role as 'owner' | 'admin' | 'member',
+        })),
         updatedAt: m.group.updatedAt.getTime(),
       }));
 
       // 过滤变更
-      const added = currentGroups.filter(g => g.updatedAt > cursor);
-      const updated = currentGroups.filter(g => g.updatedAt <= cursor && g.updatedAt > 0);
+      // 如果 cursor 为 0 或者当前没有群组数据，返回所有群组（第一次同步）
+      // 否则只返回更新的群组
+      let added: typeof currentGroups = [];
+      let updated: typeof currentGroups = [];
+      
+      if (cursor === 0n || currentGroups.length > 0) {
+        // First sync or groups exist: return all groups as "added"
+        added = currentGroups;
+        updated = [];
+      } else {
+        // Incremental sync: return groups updated since last sync
+        added = currentGroups.filter(g => g.updatedAt > Number(cursor));
+        updated = []; // Don't return updated groups, only new/updated ones
+      }
+      
       const removed: string[] = []; // 简化处理，暂不跟踪删除
 
       logger.info(`[ContactService] Sync groups: added=${added.length}, updated=${updated.length}, removed=${removed.length}`);
+      logger.info(`[ContactService] Sync groups debug: cursor=${cursor}, currentGroups.length=${currentGroups.length}, added.length=${added.length}`);
 
       return {
         added: added.map(({ updatedAt, ...rest }) => rest),
@@ -447,6 +467,59 @@ class ContactService {
       return groups;
     } catch (error: any) {
       logger.error('[ContactService] Get groups error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取单个群信息
+   */
+  async getGroup(userId: string, groupId: string) {
+    try {
+      // Verify user is a member of this group
+      const membership = await prisma.groupMember.findFirst({
+        where: {
+          groupId,
+          userId,
+        },
+        include: {
+          group: {
+            include: {
+              members: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      avatarUrl: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!membership) {
+        throw new Error('Access denied: User is not a member of this group');
+      }
+
+      return {
+        id: membership.group.id,
+        name: membership.group.name,
+        avatarUrl: membership.group.avatarUrl,
+        ownerId: membership.group.ownerId,
+        memberCount: membership.group.members.length,
+        members: membership.group.members.map(member => ({
+          userId: member.user.id,
+          name: member.user.name,
+          avatarUrl: member.user.avatarUrl,
+          role: member.role,
+        })),
+      };
+    } catch (error: any) {
+      logger.error('[ContactService] Get group error:', error);
       throw error;
     }
   }

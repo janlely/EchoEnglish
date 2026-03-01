@@ -12,6 +12,7 @@ export type ChatStackParamList = {
   SearchUser: undefined;
   FriendRequests: undefined;
   Contacts: undefined;
+  CreateGroupChat: undefined;
 };
 
 // Define the navigation parameters for the main tab navigator
@@ -28,6 +29,7 @@ export type ChatDetailScreenNavigationProp = StackNavigationProp<ChatStackParamL
 export type SearchUserScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'SearchUser'>;
 export type FriendRequestsScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'FriendRequests'>;
 export type ProfileScreenNavigationProp = StackNavigationProp<MainTabParamList, 'Profile'>;
+export type CreateGroupChatScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'CreateGroupChat'>;
 
 // Route prop types for screens that receive parameters
 export type ChatDetailScreenRouteProp = RouteProp<ChatStackParamList, 'ChatDetail'>;

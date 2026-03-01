@@ -10,6 +10,28 @@ export interface ConversationInfo {
   lastReadMsgId?: string | null;
 }
 
+export interface Message {
+  id: string;
+  msgId: string;
+  text: string;
+  type: string;
+  status: string;
+  senderId: string;
+  conversationId: string;
+  sender: {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+  } | null;
+  createdAt: string;
+}
+
+export interface SyncMessagesResponse {
+  messages: Message[];
+  hasMore: boolean;
+  latestMsgId?: string;
+}
+
 /**
  * 获取有未读消息的会话列表
  */
