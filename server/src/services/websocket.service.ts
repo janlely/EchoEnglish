@@ -256,6 +256,148 @@ class WebSocketService {
       }
     });
 
+    // Handle message translate request
+    socket.on('translate_message', async (data: { id: string; messageId: string; conversationId: string }) => {
+      logger.info(`[WebSocket] ========== TRANSLATE MESSAGE REQUEST ==========`);
+      logger.info(`[WebSocket] Received translate_message from ${userId}:`, JSON.stringify(data));
+
+      try {
+        // Import services
+        const openRouterService = (await import('./openrouter.service')).default;
+        const messageService = (await import('./message.service')).default;
+        const prisma = (await import('../config/database')).default;
+
+        logger.info(`[WebSocket] Fetching message to translate...`);
+
+        // Get the message to translate using msgId
+        const message = await prisma.message.findFirst({
+          where: { msgId: data.messageId },
+          select: {
+            id: true,
+            msgId: true,
+            text: true,
+            senderId: true,
+            createdAt: true,
+          },
+        });
+
+        if (!message) {
+          logger.error(`[WebSocket] Message not found: ${data.messageId}`);
+          socket.emit('translate_message_response', {
+            type: 'translate_message_response',
+            requestId: data.id,
+            data: {
+              type: 'error',
+              error: 'Message not found'
+            }
+          });
+          return;
+        }
+
+        logger.info(`[WebSocket] Message found:`, message.text.substring(0, 50));
+
+        // Backend always translates - caching is handled on frontend
+
+        // Get context messages (5 before, 2 after) using msgId
+        logger.info(`[WebSocket] Fetching context messages using msgId: ${data.messageId}...`);
+        const contextMessages = await messageService.getMessagesForTranslation(
+          data.conversationId,
+          data.messageId,  // This is msgId
+          5, // before count
+          2  // after count
+        );
+
+        logger.info(`[WebSocket] Context messages:`, {
+          before: contextMessages.before.length,
+          after: contextMessages.after.length
+        });
+
+        // Build translation prompt (English to Chinese)
+        const translationInput = `Please translate the following English chat message to Chinese (简体中文). Keep the translation natural and conversational.
+
+Context:
+${contextMessages.before.map((m: any, i: number) => `${i + 1}. ${m.senderId === userId ? 'Me' : 'Other'}: ${m.text}`).join('\n')}
+
+Current message to translate:
+${message.text}
+
+Directly output only the Chinese translation, no explanations.`;
+
+        logger.info(`[WebSocket] Translation input:`, translationInput.substring(0, 500));
+
+        // Stream translation from OpenRouter
+        let fullTranslation = '';
+
+        logger.info(`[WebSocket] Calling openRouterService.streamTranslate...`);
+
+        await openRouterService.streamTranslate(
+          translationInput,
+          {
+            onStart: () => {
+              logger.info(`[WebSocket] Translation stream started`);
+              socket.emit('translate_message_response', {
+                type: 'translate_message_response',
+                requestId: data.id,
+                data: {
+                  type: 'start'
+                }
+              });
+            },
+            onText: (text: string) => {
+              logger.info(`[WebSocket] Translation chunk:`, text);
+              fullTranslation += text;
+              socket.emit('translate_message_response', {
+                type: 'translate_message_response',
+                requestId: data.id,
+                data: {
+                  type: 'chunk',
+                  content: text
+                }
+              });
+            },
+            onDone: () => {
+              // Translation completed - no need to save on backend
+              // Frontend will handle caching
+              logger.info(`[WebSocket] Translation completed:`, fullTranslation.substring(0, 50));
+              socket.emit('translate_message_response', {
+                type: 'translate_message_response',
+                requestId: data.id,
+                data: {
+                  type: 'done',
+                  messageId: data.messageId,
+                  translation: fullTranslation
+                }
+              });
+            },
+            onError: (error: string) => {
+              logger.error(`[WebSocket] Translation error:`, error);
+              socket.emit('translate_message_response', {
+                type: 'translate_message_response',
+                requestId: data.id,
+                data: {
+                  type: 'error',
+                  error
+                }
+              });
+            }
+          }
+        );
+
+        logger.info(`[WebSocket] streamTranslate completed`);
+      } catch (error: any) {
+        logger.error(`[WebSocket] Translate message error:`, error.message);
+        logger.error(`[WebSocket] Error stack:`, error.stack);
+        socket.emit('translate_message_response', {
+          type: 'translate_message_response',
+          requestId: data.id,
+          data: {
+            type: 'error',
+            error: error.message
+          }
+        });
+      }
+    });
+
     // Handle disconnect
     socket.on('disconnect', () => {
       this.handleDisconnect(socket, userId);

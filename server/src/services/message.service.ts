@@ -805,6 +805,71 @@ class MessageService {
       throw error;
     }
   }
+
+  /**
+   * Get messages for translation (before and after the target message)
+   */
+  async getMessagesForTranslation(
+    conversationId: string,
+    msgId: string,  // This is msgId (frontend-generated ID)
+    beforeCount: number = 5,
+    afterCount: number = 2
+  ) {
+    try {
+      logger.info(`[MessageService] Getting messages for translation: conversation ${conversationId}, msgId ${msgId}`);
+
+      // Get the target message using msgId
+      const targetMessage = await prisma.message.findFirst({
+        where: { msgId: msgId },
+        select: { createdAt: true },
+      });
+
+      if (!targetMessage) {
+        logger.warn(`[MessageService] Target message not found: ${msgId}`);
+        return { before: [], after: [] };
+      }
+
+      // Get messages before the target message
+      const beforeMessages = await prisma.message.findMany({
+        where: {
+          conversationId,
+          createdAt: { lt: targetMessage.createdAt },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: beforeCount,
+      });
+
+      // Reverse to get chronological order
+      const before = beforeMessages.reverse().map(msg => ({
+        text: msg.text || '',
+        senderId: msg.senderId || '',
+        createdAt: msg.createdAt,
+      }));
+
+      // Get messages after the target message
+      const afterMessages = await prisma.message.findMany({
+        where: {
+          conversationId,
+          createdAt: { gt: targetMessage.createdAt },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: afterCount,
+      });
+
+      const after = afterMessages.map(msg => ({
+        text: msg.text || '',
+        senderId: msg.senderId || '',
+        createdAt: msg.createdAt,
+      }));
+
+      logger.info(`[MessageService] Retrieved ${before.length} before and ${after.length} after messages for translation`);
+
+      return { before, after };
+    } catch (error: any) {
+      logger.error('Get messages for translation error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new MessageService();

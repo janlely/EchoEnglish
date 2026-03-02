@@ -9,6 +9,9 @@ import {
   Platform,
   ActivityIndicator,
   Image,
+  Clipboard,
+  Alert,
+  Modal,
 } from 'react-native';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,25 +24,28 @@ import Animated, {
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { Message, Conversation } from '../database/models';
-import { getDatabase } from '../database';
-import { API_CONFIG } from '../config/constants';
-import { getAuthToken } from '../services/ApiService';
-import { ChatDetailScreenNavigationProp, ChatDetailScreenRouteProp } from '../types/navigation';
+import { Message, Conversation } from '../../database/models';
+import { getDatabase } from '../../database';
+import { API_CONFIG } from '../../config/constants';
+import { getAuthToken } from '../../services/ApiService';
+import { ChatDetailScreenNavigationProp, ChatDetailScreenRouteProp } from '../../types/navigation';
 import { RouteProp } from '@react-navigation/native';
-import { getAvatarUrl } from '../utils/avatar';
+import { getAvatarUrl } from '../../utils/avatar';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useWebSocket } from '../contexts/WebSocketContext';
-import { generateDirectConversationId, generateGroupConversationId, isGroupConversation } from '../utils/conversationId';
-import { useAuth } from '../contexts/AuthContext';
-import { WebSocketMessageData } from '../types/websocket';
-import { getConversationInfo } from '../api/conversations';
-import { syncContacts } from '../api/contacts';
-import { getUserInfo, getUsersBatch } from '../api/user';
-import { Friend, Group, GroupMember } from '../database/models';
-import TranslationAssistantModal from '../components/TranslationAssistantModal';
-import { ContextMessage } from '../api/assistant';
-import logger from '../utils/logger';
+import { useWebSocket } from '../../contexts/WebSocketContext';
+import { generateDirectConversationId, generateGroupConversationId, isGroupConversation } from '../../utils/conversationId';
+import { useAuth } from '../../contexts/AuthContext';
+import { WebSocketMessageData } from '../../types/websocket';
+import { getConversationInfo } from '../../api/conversations';
+import { syncContacts } from '../../api/contacts';
+import { getUserInfo, getUsersBatch } from '../../api/user';
+import { Friend, Group, GroupMember } from '../../database/models';
+import TranslationAssistantModal from '../../components/TranslationAssistantModal';
+import MessageTranslateModal from './components/MessageTranslateModal';
+import MessageActionMenu from './components/MessageActionMenu';
+import MessageBubble from './components/MessageBubble';
+import { ContextMessage } from '../../api/assistant';
+import logger from '../../utils/logger';
 
 // 生成消息 ID（时间戳 + 随机数）
 const generateMsgId = () => {
@@ -89,6 +95,9 @@ const ChatDetailScreen = () => {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const [showTranslationAssistant, setShowTranslationAssistant] = useState(false);
+  const [showMessageTranslate, setShowMessageTranslate] = useState(false);
+  const [showMessageActionMenu, setShowMessageActionMenu] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<{ id: string; msgId: string; text: string } | null>(null);
   const [latestMsgId, setLatestMsgId] = useState<string | null>(null); // 最新已同步的 msgId
   
   // 超时定时器管理
@@ -1100,69 +1109,36 @@ const ChatDetailScreen = () => {
   // 渲染单条消息的函数
   const renderMessage = ({ item }: { item: MessageInterface }) => {
     return (
-      <View
-        style={[
-          styles.messageRow,
-          item.sender === 'me' ? styles.myMessageRow : styles.otherMessageRow
-        ]}
-      >
-        {/* Avatar for other's messages */}
-        {item.sender === 'other' && item.senderAvatar && (
-          <Image
-            source={{ uri: getAvatarUrl(item.senderAvatar, 40) }}
-            style={styles.messageAvatar}
-            onError={(e) => logger.error('ChatDetailScreen', 'Avatar load error:', item.senderId, e.nativeEvent.error)}
-          />
-        )}
-
-        {/* Status indicator (loading or failed) */}
-        {item.sending && (
-          <View style={styles.statusContainer}>
-            <ActivityIndicator size="small" color="#999" />
-          </View>
-        )}
-        {item.failed && (
-          <TouchableOpacity
-            style={styles.statusContainer}
-            onPress={() => handleRetryMessage(item)}
-          >
-            <View style={styles.failedIcon}>
-              <Text style={styles.failedText}>!</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Message Bubble */}
-        <View
-          style={[
-            styles.messageBubble,
-            item.sender === 'me' ? styles.myMessage : styles.otherMessage,
-            item.failed && styles.failedMessage
-          ]}
-        >
-          <View style={styles.messageContent}>
-            <Text style={[
-              styles.messageText,
-              styles.messageTextWrap,
-              item.sender === 'me' ? styles.myMessageText : styles.otherMessageText
-            ]}>
-              {item.text}
-            </Text>
-          </View>
-          {item.sending && <Text style={styles.messageStatus}>发送中...</Text>}
-          {item.failed && <Text style={styles.failedStatus}>点击重试</Text>}
-        </View>
-
-        {/* Avatar for my messages */}
-        {item.sender === 'me' && item.senderAvatar && (
-          <Image
-            source={{ uri: getAvatarUrl(item.senderAvatar, 40) }}
-            style={styles.messageAvatar}
-            onError={(e) => logger.error('ChatDetailScreen', 'My avatar load error:', user?.id, e.nativeEvent.error)}
-          />
-        )}
-      </View>
+      <MessageBubble
+        id={item.id}
+        msgId={item.msgId}
+        text={item.text}
+        sender={item.sender}
+        senderId={item.senderId}
+        senderAvatar={item.senderAvatar}
+        timestamp={item.timestamp}
+        sending={item.sending}
+        failed={item.failed}
+        onLongPress={() => {
+          setSelectedMessage({ id: item.id, msgId: item.msgId || '', text: item.text });
+          setShowMessageActionMenu(true);
+        }}
+        onRetry={() => handleRetryMessage(item)}
+      />
     );
+  };
+
+  // Handle message action menu
+  const handleMenuAction = (action: 'translate' | 'copy') => {
+    if (!selectedMessage) return;
+
+    if (action === 'translate') {
+      setShowMessageTranslate(true);
+    } else if (action === 'copy') {
+      Clipboard.setString(selectedMessage.text);
+      Alert.alert('已复制', '消息已复制到剪贴板');
+    }
+    setSelectedMessage(null);
   };
 
   return (
@@ -1238,6 +1214,31 @@ const ChatDetailScreen = () => {
           userInput={inputText}
           conversationId={conversationId}
           onAccept={handleAcceptTranslation}
+        />
+      )}
+
+      {/* 消息操作菜单 */}
+      {showMessageActionMenu && selectedMessage && (
+        <MessageActionMenu
+          visible={showMessageActionMenu}
+          messageId={selectedMessage.id}
+          messageText={selectedMessage.text}
+          onPress={handleMenuAction}
+          onClose={() => setSelectedMessage(null)}
+        />
+      )}
+
+      {/* 消息翻译模态框 */}
+      {showMessageTranslate && selectedMessage && (
+        <MessageTranslateModal
+          visible={showMessageTranslate}
+          messageId={selectedMessage.msgId}
+          conversationId={conversationId}
+          originalText={selectedMessage.text}
+          onClose={() => {
+            setShowMessageTranslate(false);
+            setSelectedMessage(null);
+          }}
         />
       )}
     </View>

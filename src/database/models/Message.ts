@@ -14,6 +14,9 @@ export default class Message extends Model {
   @field('text')
   text!: string;
 
+  @field('translation')
+  translation?: string; // Translation result (cached locally)
+
   @field('sender_id')
   senderId!: string;
 

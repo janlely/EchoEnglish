@@ -478,6 +478,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-start',
+    alignItems: 'flex-end',
     paddingTop: 60,
     paddingRight: 16,
   },
@@ -485,7 +486,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     overflow: 'hidden',
-    minWidth: 180,
+    width: '50%',
   },
   menuItem: {
     paddingVertical: 16,

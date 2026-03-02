@@ -116,6 +116,10 @@ class WebSocketServiceClass {
     this.socket.on('messages_read', (data: WebSocketMessagesReadData) => this.emit('messages_read', data));
     this.socket.on('new_notification', (data: WebSocketNotificationData) => this.emit('new_notification', data));
     this.socket.on('assistant_response_chunk', (data: any) => this.emit('assistant_response_chunk', data));
+    this.socket.on('translate_message_response', (data: any) => {
+      console.log('[WebSocketService] Received translate_message_response:', data);
+      this.emit('translate_message_response', data);
+    });
     this.socket.on('error', (error: Error) => console.error('WebSocket error:', error));
     this.socket.on('disconnect', () => console.log('⚠️ WebSocket disconnected'));
   }
@@ -186,8 +190,16 @@ class WebSocketServiceClass {
     this.eventHandlers.get(event)?.delete(handler);
   }
 
-  private emit(event: string, data: unknown) {
+  public emit(event: string, data: unknown) {
+    // 触发本地监听器
     this.eventHandlers.get(event)?.forEach(handler => handler(data));
+    
+    // 发送到 Socket.IO 服务器
+    if (this.socket?.connected) {
+      this.socket.emit(event, data);
+    } else {
+      console.warn(`⚠️ WebSocket not connected, event '${event}' not sent to server`);
+    }
   }
 
   disconnect() {

@@ -28,6 +28,22 @@ interface StreamCallbacks {
   onDone?: () => void;
 }
 
+interface TranslateCallbacks {
+  onStart?: () => void;
+  onText?: (text: string) => void;
+  onError?: (error: string) => void;
+  onDone?: () => void;
+}
+
+const TRANSLATION_PROMPT = `You are a professional English to Chinese translator. Your task is to translate chat messages from English to Chinese.
+
+Requirements:
+- Translate naturally and conversationally
+- Keep the original meaning and tone
+- Do not add any explanations or comments
+- Output ONLY the translation, nothing else
+- Translate English text to Chinese (简体中文)`;
+
 const SYSTEM_PROMPT = `你是一个专业的英语学习助手，精通英语和中文。你的角色是帮助用户在聊天中学习和使用英语。
 你会根据聊天上下文理解用户的表达意图，提供准确的英语建议，并用中文进行讲解。
 
@@ -286,6 +302,109 @@ class OpenRouterService {
 
     const data = await response.json() as any;
     return data.choices?.[0]?.message?.content || '';
+  }
+
+  /**
+   * Stream translation from Chinese to English
+   */
+  async streamTranslate(
+    text: string,
+    callbacks: TranslateCallbacks
+  ): Promise<void> {
+    if (!this.apiKey) {
+      callbacks.onError?.('OpenRouter API key not configured');
+      return;
+    }
+
+    try {
+      logger.info('[OpenRouter] Starting translation stream for text:', text.substring(0, 50));
+
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://echoenglish.app',
+          'X-Title': 'EchoEnglish Translator',
+          'Accept': 'text/event-stream'
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [
+            { role: 'system', content: TRANSLATION_PROMPT },
+            { role: 'user', content: text }
+          ],
+          max_tokens: 500,
+          temperature: 0.3,
+          stream: true
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('[OpenRouter] Translation API error:', response.status, errorText);
+        callbacks.onError?.(`API error: ${response.status}`);
+        return;
+      }
+
+      callbacks.onStart?.();
+
+      // Get the response body as a stream
+      const responseBody = response.body;
+      if (!responseBody) {
+        callbacks.onError?.('No response body');
+        return;
+      }
+
+      // Convert to Node.js Readable stream
+      const nodeStream = Readable.from(responseBody as any);
+
+      let buffer = '';
+
+      nodeStream.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        buffer += text;
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || trimmedLine === 'data: [DONE]') {
+            continue;
+          }
+
+          // Parse SSE data
+          if (trimmedLine.startsWith('data: ')) {
+            const dataStr = trimmedLine.substring(6);
+            try {
+              const data = JSON.parse(dataStr);
+              const content = data.choices?.[0]?.delta?.content || '';
+              if (content) {
+                callbacks.onText?.(content);
+              }
+            } catch (e) {
+              // Ignore parse errors for malformed JSON
+            }
+          }
+        }
+      });
+
+      nodeStream.on('end', () => {
+        logger.info('[OpenRouter] Translation stream completed');
+        callbacks.onDone?.();
+      });
+
+      nodeStream.on('error', (error: Error) => {
+        logger.error('[OpenRouter] Translation stream error:', error);
+        callbacks.onError?.(error.message);
+      });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('[OpenRouter] Translation request error:', errorMessage);
+      callbacks.onError?.(errorMessage);
+    }
   }
 }
 

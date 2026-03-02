@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types';
 import contactService from '../services/contact.service';
+import groupAvatarService from '../services/groupAvatar.service';
 import logger from '../utils/logger';
 
 class ContactController {
@@ -102,6 +103,12 @@ class ContactController {
       }
 
       const group = await contactService.createGroup(userId, name, avatarUrl, memberIds);
+
+      // Generate group avatar automatically after group creation
+      // Run in background, don't wait for completion
+      groupAvatarService.generateGroupAvatar(group.id).catch(err => {
+        logger.error('[ContactController] Generate group avatar error:', err);
+      });
 
       res.status(201).json({
         success: true,

@@ -17,6 +17,7 @@ interface WebSocketContextType {
   markRead: (chatId: string) => void;
   startTyping: (chatId: string) => void;
   stopTyping: (chatId: string) => void;
+  translateMessage: (data: { id: string; messageId: string; conversationId: string }, handler: (response: any) => void) => () => void;
   onMessage: (handler: (data: WebSocketMessageData) => void) => () => void;
   onMessageSent: (handler: (data: WebSocketMessageData) => void) => () => void;
   onUserStatus: (handler: (data: WebSocketUserStatusData) => void) => () => void;
@@ -122,6 +123,24 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         },
         stopTyping: (chatId) => {
           WebSocketService.stopTyping(chatId);
+        },
+        translateMessage: (data, handler) => {
+          console.log('[WebSocketContext] translateMessage called:', data);
+          
+          // 先注册监听器，再发送事件
+          WebSocketService.on('translate_message_response', handler as (data: unknown) => void);
+          console.log('[WebSocketContext] translate_message_response listener registered');
+          
+          // 稍后发送事件，确保监听器已注册
+          setTimeout(() => {
+            WebSocketService.emit('translate_message', data);
+            console.log('[WebSocketContext] translate_message event emitted');
+          }, 50);
+          
+          return () => {
+            console.log('[WebSocketContext] Cleaning up translate_message listener');
+            WebSocketService.off('translate_message_response', handler as (data: unknown) => void);
+          };
         },
         onMessage: (handler: (data: WebSocketMessageData) => void) => {
           WebSocketService.on('receive_message', handler as (data: unknown) => void);

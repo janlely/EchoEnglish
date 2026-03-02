@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 7, // Increment version for schema changes
+  version: 8, // Increment version for translation field
   tables: [
     // ===== User tables =====
 
@@ -103,6 +103,7 @@ export const schema = appSchema({
       columns: [
         { name: 'conversation_id', type: 'string' },
         { name: 'text', type: 'string' },
+        { name: 'translation', type: 'string', isOptional: true }, // Translation cache
         { name: 'sender_id', type: 'string' },
         { name: 'chat_session_id', type: 'string', isOptional: true }, // 保留字段用于兼容
         { name: 'chat_type', type: 'string' },       // 'direct' | 'group'
