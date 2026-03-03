@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
@@ -18,6 +17,7 @@ import { getConversationsWithUnread } from '../api/conversations';
 import { syncContacts, getGroupInfo } from '../api/contacts';
 import { getAvatarUrl } from '../utils/avatar';
 import logger from '../utils/logger';
+import BubbleMenu from '../components/BubbleMenu';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -86,6 +86,7 @@ const MainScreen = () => {
   const [chatSessions, setChatSessions] = useState<ChatSessionInterface[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
+  const menuButtonRef = useRef<View>(null);
   const database = useDatabase();
 
   /**
@@ -268,14 +269,13 @@ const MainScreen = () => {
         fontWeight: 'bold',
       },
       headerRight: () => (
-        <View style={{ position: 'relative' }}>
-          <TouchableOpacity
-            style={{ paddingRight: 16 }}
-            onPress={() => setMenuVisible(true)}
-          >
-            <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#007AFF' }}>+</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          ref={menuButtonRef}
+          style={{ paddingRight: 16 }}
+          onPress={() => setMenuVisible(true)}
+        >
+          <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#007AFF' }}>+</Text>
+        </TouchableOpacity>
       ),
     });
   }, [navigation]);
@@ -349,41 +349,27 @@ const MainScreen = () => {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Menu Modal */}
-      <Modal
-        visible={menuVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.menuOverlay}
-          activeOpacity={1}
-          onPress={() => setMenuVisible(false)}
-        >
-          <View style={styles.menuContainer}>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                navigation.navigate('SearchUser');
-              }}
-            >
-              <Text style={styles.menuItemText}>👤 添加好友</Text>
-            </TouchableOpacity>
-            <View style={styles.menuSeparator} />
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                navigation.navigate('CreateGroupChat');
-              }}
-            >
-              <Text style={styles.menuItemText}>👥 创建群聊</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* Bubble Menu */}
+      <BubbleMenu
+        isVisible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        fromRef={menuButtonRef}
+        showArrow={true}
+        placement="bottom"
+        offset={-10}
+        items={[
+          {
+            id: 'add-friend',
+            label: '👤 添加好友',
+            onPress: () => navigation.navigate('SearchUser'),
+          },
+          {
+            id: 'create-group',
+            label: '👥 创建群聊',
+            onPress: () => navigation.navigate('CreateGroupChat'),
+          },
+        ]}
+      />
     </View>
   );
 };
@@ -473,33 +459,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  menuOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-    paddingTop: 60,
-    paddingRight: 16,
-  },
-  menuContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-    width: '50%',
-  },
-  menuItem: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    backgroundColor: '#fff',
-  },
-  menuItemText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  menuSeparator: {
-    height: 1,
-    backgroundColor: '#e0e0e0',
   },
 });
 

@@ -8,13 +8,13 @@
  */
 
 import React, { useRef } from 'react';
-import { FlatList, StyleSheet } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { MessageInterface } from '../types';
 import MessageBubble from './MessageBubble';
 
 interface ChatMessagesListProps {
   messages: MessageInterface[];
-  onMessageLongPress: (message: { id: string; msgId: string; text: string }) => void;
+  onMessageLongPress: (message: { id: string; msgId: string; text: string }, ref: View | null) => void;
   onMessageRetry: (message: MessageInterface) => void;
 }
 
@@ -24,6 +24,7 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
   onMessageRetry,
 }) => {
   const scrollViewRef = useRef<FlatList>(null);
+  const bubbleRefs = useRef<Map<string, View>>(new Map());
 
   /**
    * 渲染单条消息
@@ -39,8 +40,16 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
       timestamp={item.timestamp}
       sending={item.sending}
       failed={item.failed}
+      onRef={(ref) => {
+        if (ref) {
+          bubbleRefs.current.set(item.id, ref);
+        } else {
+          bubbleRefs.current.delete(item.id);
+        }
+      }}
       onLongPress={() => {
-        onMessageLongPress({ id: item.id, msgId: item.msgId || '', text: item.text });
+        const ref = bubbleRefs.current.get(item.id) || null;
+        onMessageLongPress({ id: item.id, msgId: item.msgId || '', text: item.text }, ref);
       }}
       onRetry={() => onMessageRetry(item)}
     />

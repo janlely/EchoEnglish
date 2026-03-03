@@ -1,12 +1,6 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-} from 'react-native';
+import React, { useRef } from 'react';
+import { View } from 'react-native';
+import BubbleMenu, { BubbleMenuItem } from '../../../components/BubbleMenu';
 
 interface MessageActionMenuProps {
   visible: boolean;
@@ -14,6 +8,15 @@ interface MessageActionMenuProps {
   messageId: string;
   onPress: (action: 'translate' | 'copy') => void;
   onClose: () => void;
+  // 锚点 ref（消息气泡的位置）
+  anchorRef?: React.RefObject<any>;
+  // 锚点位置信息（用于计算菜单显示位置）
+  anchorPosition?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
@@ -22,60 +25,39 @@ const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
   messageId,
   onPress,
   onClose,
+  anchorRef,
+  anchorPosition,
 }) => {
+  const internalRef = useRef<View>(null);
+  const ref = anchorRef || internalRef;
+
+  const items: BubbleMenuItem[] = [
+    {
+      id: 'translate',
+      label: '🔤 翻译',
+      onPress: () => onPress('translate'),
+    },
+    {
+      id: 'copy',
+      label: '📋 复制',
+      onPress: () => onPress('copy'),
+    },
+  ];
+
+  // 根据锚点位置决定菜单显示位置
+  // 如果锚点在屏幕下半部分（y > 屏幕一半），菜单显示在上方；否则显示在下方
+  const placement = anchorPosition && anchorPosition.y > 400 ? 'top' : 'bottom';
+
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
-          <View style={styles.menuContainer}>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => onPress('translate')}
-            >
-              <Text style={styles.menuItemText}>🔤 翻译</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => onPress('copy')}
-            >
-              <Text style={styles.menuItemText}>📋 复制</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
+    <BubbleMenu
+      isVisible={visible}
+      onClose={onClose}
+      fromRef={ref}
+      showArrow={true}
+      placement={placement}
+      items={items}
+    />
   );
 };
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menuContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    minWidth: 150,
-    overflow: 'hidden',
-  },
-  menuItem: {
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  menuItemText: {
-    fontSize: 16,
-    color: '#333',
-    textAlign: 'center',
-  },
-});
 
 export default MessageActionMenu;

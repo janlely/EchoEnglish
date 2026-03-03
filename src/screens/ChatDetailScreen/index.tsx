@@ -71,6 +71,8 @@ const ChatDetailScreen = () => {
   const [showMessageTranslate, setShowMessageTranslate] = useState(false);
   const [showMessageActionMenu, setShowMessageActionMenu] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<SelectedMessage | null>(null);
+  const [messageBubbleRef, setMessageBubbleRef] = useState<View | null>(null);
+  const [anchorPosition, setAnchorPosition] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // 自定义 Hooks
   const {
@@ -177,8 +179,17 @@ const ChatDetailScreen = () => {
   }, [navigation, chatName, tabNavigation]);
 
   // 处理消息长按
-  const handleMessageLongPress = (message: SelectedMessage) => {
+  const handleMessageLongPress = (message: SelectedMessage, ref: View | null) => {
     setSelectedMessage(message);
+    setMessageBubbleRef(ref);
+
+    // 测量消息气泡的位置
+    if (ref) {
+      ref.measureInWindow((x, y, width, height) => {
+        setAnchorPosition({ x, y, width, height });
+      });
+    }
+
     setShowMessageActionMenu(true);
   };
 
@@ -273,7 +284,13 @@ const ChatDetailScreen = () => {
           messageId={selectedMessage.id}
           messageText={selectedMessage.text}
           onPress={handleMenuAction}
-          onClose={() => setSelectedMessage(null)}
+          onClose={() => {
+            setSelectedMessage(null);
+            setMessageBubbleRef(null);
+            setAnchorPosition(null);
+          }}
+          anchorRef={messageBubbleRef ? { current: messageBubbleRef } : undefined}
+          anchorPosition={anchorPosition || undefined}
         />
       )}
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,8 @@ export interface MessageBubbleProps {
   failed?: boolean;
   onLongPress?: () => void;
   onRetry?: () => void;
+  // Ref 回调，用于获取气泡位置
+  onRef?: (ref: View | null) => void;
 }
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -33,6 +35,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   failed,
   onLongPress,
   onRetry,
+  onRef,
 }) => {
   const isMe = sender === 'me';
 
@@ -73,6 +76,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
       {/* Message Bubble */}
       <View
+        ref={onRef}
         style={[
           styles.messageBubble,
           isMe ? styles.myMessage : styles.otherMessage,
