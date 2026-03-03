@@ -23,11 +23,6 @@ const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
   onPress,
   onClose,
 }) => {
-  const handleAction = (action: 'translate' | 'copy') => {
-    onPress(action);
-    onClose();
-  };
-
   return (
     <Modal
       visible={visible}
@@ -40,13 +35,13 @@ const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
           <View style={styles.menuContainer}>
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => handleAction('translate')}
+              onPress={() => onPress('translate')}
             >
               <Text style={styles.menuItemText}>🔤 翻译</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => handleAction('copy')}
+              onPress={() => onPress('copy')}
             >
               <Text style={styles.menuItemText}>📋 复制</Text>
             </TouchableOpacity>
