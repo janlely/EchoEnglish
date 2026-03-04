@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react';
 import { getDatabase, initDatabase } from './src/database';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { WebSocketProvider } from './src/contexts/WebSocketContext';
+import { ThemeProvider } from './src/contexts/ThemeContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import AuthNavigator from './src/navigation/AuthNavigator';
 import logger from './src/utils/logger';
@@ -83,7 +84,7 @@ const AppContent = () => {
   if (loading || dbInitializing) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
+        <StatusBar barStyle="dark-content" backgroundColor="#F9FAFB" />
         <View style={styles.loadingContainer}>
           <Text>Loading...</Text>
         </View>
@@ -126,16 +127,18 @@ const AppContent = () => {
 
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#F9FAFB', // 使用新的背景色
   },
   loadingContainer: {
     flex: 1,

@@ -89,3 +89,36 @@ export const getGroupInfo = async (groupId: string): Promise<any> => {
     return null;
   }
 };
+
+/**
+ * Update group name
+ * @param groupId - The group ID
+ * @param name - The new group name
+ */
+export const updateGroupName = async (groupId: string, name: string): Promise<any> => {
+  try {
+    const token = await getAuthToken();
+
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/contacts/groups/${groupId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        name,
+      }),
+    });
+
+    const data: any = await response.json();
+
+    if (response.ok && data.success) {
+      return data.data;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[Groups API] Update group name error:', error);
+    return null;
+  }
+};

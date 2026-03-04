@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import { Observable } from 'rxjs';
 import {
   View,
   Text,
@@ -26,8 +27,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
+import { Q } from '@nozbe/watermelondb';
+import { Conversation, Group, Friend, GroupMember } from '../../database/models';
 import { getDatabase } from '../../database';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { Model } from '@nozbe/watermelondb';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { generateDirectConversationId, generateGroupConversationId } from '../../utils/conversationId';
 import { useAuth } from '../../contexts/AuthContext';
@@ -73,6 +77,7 @@ const ChatDetailScreen = () => {
   const [selectedMessage, setSelectedMessage] = useState<SelectedMessage | null>(null);
   const [messageBubbleRef, setMessageBubbleRef] = useState<View | null>(null);
   const [anchorPosition, setAnchorPosition] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [currentChatName, setCurrentChatName] = useState(chatName); // State for current chat name
 
   // 自定义 Hooks
   const {
@@ -133,6 +138,73 @@ const ChatDetailScreen = () => {
     transform: [{ translateY: translateY.value }],
   }));
 
+  // 订阅群组名称变更
+  useEffect(() => {
+    if (!database || chatType !== 'group') return;
+
+    let subscription: any;
+    
+    const setupSubscription = async () => {
+      logger.debug('ChatDetailScreen', 'Setting up group name subscription for:', chatId);
+      
+      // Fetch initial name
+      try {
+        const groupRecords = await database.collections
+          .get<Group>('groups')
+          .query(Q.where('group_id', Q.eq(chatId)))
+          .fetch();
+        
+        logger.debug('ChatDetailScreen', 'Initial group records found:', groupRecords.length);
+        
+        if (groupRecords.length > 0) {
+          logger.debug('ChatDetailScreen', 'Current name:', currentChatName, 'Group name:', groupRecords[0].name);
+          if (groupRecords[0].name !== currentChatName) {
+            const newGroupName = groupRecords[0].name;
+            logger.info('ChatDetailScreen', 'Updating group name from subscription:', newGroupName);
+            setCurrentChatName(newGroupName);
+            
+            // Update navigation options directly to ensure header updates
+            navigation.setOptions({
+              headerTitle: newGroupName,
+            });
+          }
+        }
+      } catch (error) {
+        logger.error('ChatDetailScreen', 'Error fetching initial group name:', error);
+      }
+
+      // Subscribe to changes
+      const observable = database.collections
+        .get('groups')
+        .query(Q.where('group_id', Q.eq(chatId)))
+        .observe();
+
+      subscription = observable.subscribe((groups: Model[]) => {
+        const typedGroups = groups as Group[];
+        logger.debug('ChatDetailScreen', 'Group subscription triggered, groups found:', typedGroups.length);
+        if (typedGroups.length > 0 && typedGroups[0].name !== currentChatName) {
+          const newGroupName = typedGroups[0].name;
+          logger.info('ChatDetailScreen', 'Group name changed via subscription:', newGroupName);
+          setCurrentChatName(newGroupName);
+          
+          // Update navigation options directly to ensure header updates
+          navigation.setOptions({
+            headerTitle: newGroupName,
+          });
+        }
+      });
+    };
+
+    setupSubscription();
+
+    return () => {
+      if (subscription) {
+        logger.debug('ChatDetailScreen', 'Unsubscribing from group name changes');
+        subscription.unsubscribe();
+      }
+    };
+  }, [database, chatId, chatType, currentChatName, navigation]);
+
   // 设置导航栏
   useEffect(() => {
     if (tabNavigation) {
@@ -148,7 +220,7 @@ const ChatDetailScreen = () => {
         borderBottomWidth: 1,
         borderBottomColor: '#e0e0e0',
       },
-      headerTitle: chatName,
+      headerTitle: currentChatName, // Use currentChatName instead of initial chatName
       headerTitleAlign: 'center',
       headerTitleStyle: {
         fontSize: 18,
@@ -162,11 +234,25 @@ const ChatDetailScreen = () => {
           <Text style={{ fontSize: 24, fontWeight: 'normal' }}>‹</Text>
         </TouchableOpacity>
       ),
-      headerRight: () => (
-        <TouchableOpacity style={{ paddingRight: 16 }}>
-          <Text style={{ fontSize: 20 }}>⋮</Text>
-        </TouchableOpacity>
-      ),
+      headerRight: () => {
+        if (chatType === 'group') {
+          return (
+            <TouchableOpacity
+              style={{ paddingRight: 16 }}
+              onPress={() => {
+                // Using navigate with proper parameters for GroupDetail
+                (navigation as any).navigate('GroupDetail', {
+                  groupId: chatId,
+                  groupName: currentChatName,
+                });
+              }}
+            >
+              <Text style={{ fontSize: 20 }}>⋯</Text>
+            </TouchableOpacity>
+          );
+        }
+        return null;
+      },
     });
 
     return () => {
@@ -176,7 +262,44 @@ const ChatDetailScreen = () => {
         });
       }
     };
-  }, [navigation, chatName, tabNavigation]);
+  }, [navigation, currentChatName, tabNavigation]);
+
+  // 当屏幕获得焦点时，刷新群组名称
+  useFocusEffect(
+    React.useCallback(() => {
+      if (chatType === 'group' && database) {
+        logger.debug('ChatDetailScreen', 'Focus effect triggered, checking for group name update');
+        const fetchGroupName = async () => {
+          try {
+            const groupRecords = await database.collections
+              .get<Group>('groups')
+              .query(Q.where('group_id', Q.eq(chatId)))
+              .fetch();
+            
+            logger.debug('ChatDetailScreen', 'Fetched groups on focus:', groupRecords.length);
+            
+            if (groupRecords.length > 0) {
+              logger.debug('ChatDetailScreen', 'Comparing names - Current:', currentChatName, 'DB:', groupRecords[0].name);
+              if (groupRecords[0].name !== currentChatName) {
+                const newGroupName = groupRecords[0].name;
+                logger.info('ChatDetailScreen', 'Updating group name on focus:', newGroupName);
+                setCurrentChatName(newGroupName);
+                
+                // Update navigation options directly to ensure header updates
+                navigation.setOptions({
+                  headerTitle: newGroupName,
+                });
+              }
+            }
+          } catch (error) {
+            logger.error('ChatDetailScreen', 'Error fetching group name on focus:', error);
+          }
+        };
+
+        fetchGroupName();
+      }
+    }, [database, chatId, chatType, currentChatName, navigation])
+  );
 
   // 处理消息长按
   const handleMessageLongPress = (message: SelectedMessage, ref: View | null) => {

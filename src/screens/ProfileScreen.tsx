@@ -15,9 +15,11 @@ import { ProfileScreenNavigationProp } from '../types/navigation';
 import AvatarCropper from '../components/AvatarCropper';
 import { uploadAvatar } from '../api/user';
 import { getDisplayAvatarUrl, downloadAndSaveAvatar } from '../utils/avatar';
+import { useTheme } from '../hooks/useTheme';
 
 const ProfileScreen = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
+  const { colors, spacing, typography, shadows } = useTheme();
   const { user, updateUser, logout } = useAuth();
   const [showCropper, setShowCropper] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -77,9 +79,9 @@ const ProfileScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Profile Header */}
-      <View style={styles.profileHeader}>
+      <View style={[styles.profileHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border, padding: spacing.lg }]}>
         <TouchableOpacity onPress={handleAvatarPress} disabled={uploading}>
           <View style={styles.avatarContainer}>
             <Image
@@ -87,37 +89,53 @@ const ProfileScreen = () => {
               style={styles.avatar}
             />
             {uploading && (
-              <View style={styles.uploadingOverlay}>
-                <ActivityIndicator size="small" color="#fff" />
+              <View style={[styles.uploadingOverlay, { backgroundColor: colors.overlay }]}>
+                <ActivityIndicator size="small" color={colors.white} />
               </View>
             )}
           </View>
         </TouchableOpacity>
-        <View style={styles.userInfo}>
-          <Text style={styles.userName}>{user?.name || '用户'}</Text>
-          <Text style={styles.userEmail}>{user?.email || ''}</Text>
+        <View style={[styles.userInfo, { marginLeft: spacing.md }]}>
+          <Text style={[styles.userName, { color: colors.textPrimary, ...typography.title3 }]}>
+            {user?.name || '用户'}
+          </Text>
+          <Text style={[styles.userEmail, { color: colors.textSecondary }]}>
+            {user?.email || ''}
+          </Text>
         </View>
       </View>
 
       {/* Menu Items */}
-      <TouchableOpacity style={styles.menuItem} onPress={() => {}}>
-        <Text style={styles.menuItemText}>个人设置</Text>
-        <Text style={styles.menuItemArrow}>›</Text>
+      <TouchableOpacity 
+        style={[styles.menuItem, { backgroundColor: colors.surface, paddingVertical: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.sm }]}
+        onPress={() => {}}
+      >
+        <Text style={[styles.menuItemText, { color: colors.textPrimary }]}>{'个人设置'}</Text>
+        <Text style={[styles.menuItemArrow, { color: colors.textTertiary }]}>›</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.menuItem} onPress={() => {}}>
-        <Text style={styles.menuItemText}>消息设置</Text>
-        <Text style={styles.menuItemArrow}>›</Text>
+      <TouchableOpacity 
+        style={[styles.menuItem, { backgroundColor: colors.surface, paddingVertical: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.sm }]}
+        onPress={() => {}}
+      >
+        <Text style={[styles.menuItemText, { color: colors.textPrimary }]}>{'消息设置'}</Text>
+        <Text style={[styles.menuItemArrow, { color: colors.textTertiary }]}>›</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.menuItem} onPress={() => {}}>
-        <Text style={styles.menuItemText}>隐私设置</Text>
-        <Text style={styles.menuItemArrow}>›</Text>
+      <TouchableOpacity 
+        style={[styles.menuItem, { backgroundColor: colors.surface, paddingVertical: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.sm }]}
+        onPress={() => {}}
+      >
+        <Text style={[styles.menuItemText, { color: colors.textPrimary }]}>{'隐私设置'}</Text>
+        <Text style={[styles.menuItemArrow, { color: colors.textTertiary }]}>›</Text>
       </TouchableOpacity>
 
       {/* Logout Button */}
-      <TouchableOpacity style={[styles.menuItem, styles.logoutButton]} onPress={handleLogout}>
-        <Text style={[styles.menuItemText, styles.logoutText]}>退出登录</Text>
+      <TouchableOpacity 
+        style={[styles.menuItem, styles.logoutButton, { backgroundColor: colors.surface, paddingVertical: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.lg }]}
+        onPress={handleLogout}
+      >
+        <Text style={[styles.menuItemText, styles.logoutText, { color: colors.error }]}>{'退出登录'}</Text>
       </TouchableOpacity>
 
       {/* Avatar Cropper Modal */}
@@ -133,15 +151,11 @@ const ProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
   },
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   avatarContainer: {
     position: 'relative',
@@ -153,46 +167,36 @@ const styles = StyleSheet.create({
   },
   uploadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',
   },
   userInfo: {
-    marginLeft: 16,
     flex: 1,
   },
   userName: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
     marginBottom: 4,
   },
   userEmail: {
     fontSize: 14,
-    color: '#666',
   },
   menuItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    padding: 16,
-    marginTop: 10,
   },
   menuItemText: {
     fontSize: 16,
-    color: '#333',
   },
   menuItemArrow: {
     fontSize: 20,
-    color: '#999',
   },
   logoutButton: {
     marginTop: 20,
   },
   logoutText: {
-    color: '#FF3B30',
     textAlign: 'center',
   },
 });

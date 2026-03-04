@@ -11,12 +11,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { StackActions } from '@react-navigation/native';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { Friend } from '../database/models';
+import { Friend, Group, GroupMember } from '../database/models';
 import { CreateGroupChatScreenNavigationProp } from '../types/navigation';
 import { createGroup } from '../api/groups';
 import { getAvatarUrl } from '../utils/avatar';
+import { useAuth } from '../contexts/AuthContext';
 
 interface FriendInterface {
   id: string;
@@ -31,6 +33,7 @@ const MIN_MEMBERS = 2; // Minimum number of members required to create a group (
 
 const CreateGroupChatScreen = () => {
   const navigation = useNavigation<CreateGroupChatScreenNavigationProp>();
+  const { user } = useAuth();
   const database = useDatabase();
   const [searchText, setSearchText] = useState('');
   const [allFriends, setAllFriends] = useState<FriendInterface[]>([]);
@@ -112,22 +115,68 @@ const CreateGroupChatScreen = () => {
       const result = await createGroup(groupName, selectedMemberIds);
 
       if (result.success && result.data?.group) {
-        Alert.alert(
-          '创建成功',
-          `群聊 "${result.data.group.name}" 已创建`,
-          [
-            {
-              text: '确定',
-              onPress: () => {
-                // Navigate to the new group chat
-                navigation.navigate('ChatDetail', {
-                  chatId: result.data!.group.id,
-                  chatName: result.data!.group.name,
-                  chatType: 'group',
-                });
-              },
-            },
-          ]
+        // Save the created group and members to local database
+        if (database) {
+          await database.write(async () => {
+            // Check if group already exists to avoid duplicates
+            const existingGroups = await database.collections
+              .get<Group>('groups')
+              .query(Q.where('group_id', Q.eq(result.data?.group.id ?? '')))
+              .fetch();
+
+            if (existingGroups.length === 0) {
+              await database.collections.get<Group>('groups').create((g: Group) => {
+                g.groupId = result.data?.group.id || '';
+                g.name = result.data?.group.name || '';
+                g.avatarUrl = result.data?.group.avatarUrl || undefined;
+                g.ownerId = result.data?.group.ownerId || '';
+                g.memberIds = JSON.stringify(selectedMemberIds);
+                g.createdAt = Date.now();
+                g.updatedAt = Date.now();
+              });
+            }
+
+            // Get complete group member info from the server and save to local database
+            const { getGroupInfo } = await import('../api/contacts');
+            const groupInfo = await getGroupInfo(result.data!.group.id);
+            
+            if (groupInfo && groupInfo.members) {
+              for (const member of groupInfo.members) {
+                // Check if member already exists
+                const existingMembers = await database.collections
+                  .get<GroupMember>('group_members')
+                  .query(
+                    Q.and(
+                      Q.where('group_id', Q.eq(result.data!.group.id)),
+                      Q.where('user_id', Q.eq(member.userId))
+                    )
+                  )
+                  .fetch();
+
+                if (existingMembers.length === 0) {
+                  await database.collections.get<GroupMember>('group_members').create((m: GroupMember) => {
+                    m.groupId = result.data!.group.id;
+                    m.userId = member.userId;
+                    m.name = member.name;
+                    m.avatarUrl = member.avatarUrl;
+                    m.role = member.role;
+                    m.joinedAt = Date.now();
+                    m.createdAt = Date.now();
+                    m.updatedAt = Date.now();
+                  });
+                }
+              }
+            }
+          });
+        }
+
+        // Navigate to the new group chat and reset navigation stack to remove CreateGroupChat
+        navigation.dispatch(
+          StackActions.replace('ChatDetail', {
+            chatId: result.data!.group.id,
+            chatName: result.data!.group.name,
+            chatType: 'group',
+          })
         );
       } else {
         Alert.alert('创建失败', result.error || '请稍后重试');

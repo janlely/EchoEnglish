@@ -19,5 +19,6 @@ router.get('/groups/:groupId', contactsController.getGroup);
 router.post('/groups', contactsController.createGroup);
 router.post('/groups/:groupId/members', contactsController.addGroupMember);
 router.delete('/groups/:groupId/members', contactsController.removeGroupMember);
+router.put('/groups/:groupId', contactsController.updateGroupName);
 
 export default router;

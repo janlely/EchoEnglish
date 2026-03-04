@@ -13,6 +13,7 @@ export { default as Friend } from './Friend';
 export { default as Group } from './Group';
 export { default as GroupMember } from './GroupMember';
 export { default as SyncCursor } from './SyncCursor';
+export { default as FriendRequest } from './FriendRequest';
 
 // Schema
 export { schema } from '../schema';

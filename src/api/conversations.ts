@@ -8,6 +8,10 @@ export interface ConversationInfo {
   avatarUrl?: string | null;
   unreadCount: number;
   lastReadMsgId?: string | null;
+  latestMsgId?: string | null;
+  latestSummary?: string | null;
+  latestSenderId?: string | null;
+  latestTimestamp?: string | null;
 }
 
 export interface Message {

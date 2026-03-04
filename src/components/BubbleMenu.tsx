@@ -76,7 +76,7 @@ const BubbleMenu: React.FC<BubbleMenuProps> = ({
       isVisible={isVisible}
       from={effectiveRef}
       onRequestClose={onClose}
-      placement={placement as any}
+      placement={'auto' as any}
       popoverStyle={[
         styles.popover,
         { backgroundColor, borderRadius },

@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 8, // Increment version for translation field
+  version: 9, // Increment for friend_requests table
   tables: [
     // ===== User tables =====
 
@@ -74,6 +74,23 @@ export const schema = appSchema({
         { name: 'friend_cursor', type: 'string' },  // 好友同步游标（字符串格式的时间戳）
         { name: 'group_cursor', type: 'string' },   // 群聊同步游标
         { name: 'request_cursor', type: 'string' }, // 好友请求同步游标
+      ],
+    }),
+
+    // Friend requests table - 好友申请
+    tableSchema({
+      name: 'friend_requests',
+      columns: [
+        { name: 'request_id', type: 'string' },     // 申请 ID (主键)
+        { name: 'sender_id', type: 'string' },      // 发送者 ID
+        { name: 'sender_name', type: 'string' },    // 发送者名称
+        { name: 'sender_email', type: 'string' },   // 发送者邮箱
+        { name: 'sender_avatar', type: 'string', isOptional: true }, // 发送者头像
+        { name: 'message', type: 'string', isOptional: true },       // 申请消息
+        { name: 'is_read', type: 'boolean' },       // 是否已读
+        { name: 'status', type: 'string' },         // 'pending' | 'accepted' | 'rejected'
+        { name: 'created_at', type: 'number' },
+        { name: 'updated_at', type: 'number' },
       ],
     }),
 

@@ -404,7 +404,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 50,
     height: 50,
-    borderRadius: 25,
+    borderRadius: 8,
   },
   onlineIndicator: {
     position: 'absolute',

@@ -640,6 +640,43 @@ class ContactService {
       throw error;
     }
   }
+
+  /**
+   * 更新群组名称
+   */
+  async updateGroupName(groupId: string, name: string, userId: string) {
+    try {
+      // 检查用户是否是群主
+      const groupMember = await prisma.groupMember.findUnique({
+        where: {
+          groupId_userId: {
+            groupId,
+            userId,
+          },
+        },
+      });
+
+      if (!groupMember || groupMember.role !== 'owner') {
+        throw new Error('Unauthorized: Only group owner can update group name');
+      }
+
+      // 更新群组名称
+      const updatedGroup = await prisma.group.update({
+        where: {
+          id: groupId,
+        },
+        data: {
+          name,
+        },
+      });
+
+      logger.info(`[ContactService] Updated group name for group: ${groupId}`);
+      return updatedGroup;
+    } catch (error: any) {
+      logger.error('[ContactService] Update group name error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new ContactService();

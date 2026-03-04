@@ -8,6 +8,7 @@ import {
   Group,
   GroupMember,
   SyncCursor,
+  FriendRequest,
 } from './models';
 
 let databaseInstance: Database | null = null;
@@ -33,6 +34,7 @@ export const initDatabase = (userId: string) => {
       Group,
       GroupMember,
       SyncCursor,
+      FriendRequest,
     ],
   });
 
@@ -57,8 +59,9 @@ export const database = new Database({
     Group,
     GroupMember,
     SyncCursor,
+    FriendRequest,
   ],
 });
 
 // Export types for convenience
-export type { User, Conversation, Message, Friend, Group, GroupMember, SyncCursor };
+export type { User, Conversation, Message, Friend, Group, GroupMember, SyncCursor, FriendRequest };

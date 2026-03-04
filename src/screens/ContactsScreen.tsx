@@ -13,12 +13,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { syncContacts, getFriends, getGroups } from '../api/contacts';
 import { Friend, Group, GroupMember, SyncCursor } from '../database/models';
 import { ChatDetailScreenNavigationProp, ContactsScreenNavigationProp } from '../types/navigation';
 import { TokenStorage } from '../services/TokenStorage';
 import { getAvatarUrl } from '../utils/avatar';
 import { API_CONFIG } from '../config/constants';
+import { contactSyncService } from '../services/ContactSyncService';
+import { friendRequestService } from '../services/FriendRequestService';
 
 interface FriendItem {
   id: string;
@@ -156,14 +157,14 @@ const GroupItemComponent = ({
 const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const db = useDatabase();
-  
+
   // 数据状态
   const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>([]);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [groups, setGroups] = useState<GroupItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  
+
   // 折叠状态
   const [requestsExpanded, setRequestsExpanded] = useState(true);
   const [friendsExpanded, setFriendsExpanded] = useState(true);
@@ -174,6 +175,14 @@ const ContactsScreen = () => {
     const { accessToken } = await TokenStorage.getTokens();
     return accessToken;
   };
+
+  // 初始化同步服务
+  useEffect(() => {
+    if (db) {
+      contactSyncService.setDatabase(db);
+      friendRequestService.setDatabase(db);
+    }
+  }, [db]);
 
   useEffect(() => {
     // 设置页面标题和自定义头部
@@ -197,12 +206,102 @@ const ContactsScreen = () => {
     loadContacts();
   }, []);
 
-  // 每次页面聚焦时刷新好友请求
+  // 每次页面聚焦时刷新联系人列表
   useFocusEffect(
     React.useCallback(() => {
-      fetchFriendRequests();
-    }, [])
+      loadContacts();
+    }, []) // Empty dependency array to avoid circular dependency
   );
+
+  /**
+   * 加载本地联系人（好友、群组）
+   */
+  const loadContacts = async () => {
+    if (!db) {
+      console.log('[Contacts] Database not available');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      console.log('[Contacts] Loading contacts from local database...');
+
+      // 执行增量同步（失败也不影响后续加载）
+      try {
+        await contactSyncService.syncContacts();
+      } catch (syncError) {
+        console.warn('[Contacts] Sync failed, loading from local cache:', syncError);
+      }
+
+      // 同步好友申请（失败也不影响后续加载）
+      try {
+        await friendRequestService.syncPendingRequests();
+      } catch (syncError) {
+        console.warn('[Contacts] Friend request sync failed:', syncError);
+      }
+
+      // 从本地数据库加载好友
+      const dbFriends = await db.collections
+        .get<Friend>('friends')
+        .query(Q.sortBy('name', Q.asc))
+        .fetch();
+
+      // 从本地数据库加载群组
+      const dbGroups = await db.collections
+        .get<Group>('groups')
+        .query(Q.sortBy('name', Q.asc))
+        .fetch();
+
+      // 获取群成员数量
+      const groupsWithCount = await Promise.all(
+        dbGroups.map(async (group) => {
+          try {
+            const memberCount = await db.collections
+              .get<GroupMember>('group_members')
+              .query(Q.where('group_id', Q.eq(group.groupId)))
+              .fetchCount();
+
+            return {
+              id: group.groupId,
+              name: group.name,
+              avatarUrl: group.avatarUrl,
+              memberCount,
+            };
+          } catch (e) {
+            return {
+              id: group.groupId,
+              name: group.name,
+              avatarUrl: group.avatarUrl,
+              memberCount: 0,
+            };
+          }
+        })
+      );
+
+      setFriends(
+        dbFriends.map((f) => ({
+          id: f.friendId,
+          name: f.name,
+          email: f.email,
+          avatarUrl: f.avatarUrl,
+          isOnline: f.isOnline,
+        }))
+      );
+
+      setGroups(groupsWithCount);
+
+      // 加载好友申请
+      await fetchFriendRequests();
+
+      console.log('[Contacts] Loaded', dbFriends.length, 'friends and', groupsWithCount.length, 'groups');
+    } catch (error: any) {
+      console.error('[Contacts] Load contacts error:', error.message);
+    } finally {
+      setLoading(false);
+      setSyncing(false);
+    }
+  };
 
   /**
    * 获取好友请求列表
@@ -256,7 +355,7 @@ const ContactsScreen = () => {
               if (response.ok && data.success) {
                 Alert.alert('成功', '已添加为好友');
                 fetchFriendRequests();
-                syncContactsFromServer();
+                contactSyncService.syncContacts().then(loadContacts);
               } else {
                 Alert.alert('失败', data.error || '请稍后重试');
               }
@@ -311,217 +410,6 @@ const ContactsScreen = () => {
   };
 
   /**
-   * Load contacts from local database
-   */
-  const loadContacts = async () => {
-    if (!db) {
-      console.log('[Contacts] Database not available');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      console.log('[Contacts] Loading contacts from local database...');
-
-      // Load friends
-      const friendList = await db.collections
-        .get<Friend>('friends')
-        .query(Q.sortBy('name', Q.asc))
-        .fetch();
-
-      // Load groups
-      const groupList = await db.collections
-        .get<Group>('groups')
-        .query(Q.sortBy('name', Q.asc))
-        .fetch();
-
-      setFriends(friendList.map(f => ({
-        id: f.friendId,
-        name: f.name,
-        email: '',
-        avatarUrl: f.avatarUrl,
-        isOnline: f.isOnline,
-      })));
-
-      setGroups(groupList.map(g => ({
-        id: g.groupId,
-        name: g.name,
-        avatarUrl: g.avatarUrl,
-        memberCount: g.getMemberIds().length,
-      })));
-
-      console.log('[Contacts] Loaded', friendList.length, 'friends and', groupList.length, 'groups');
-    } catch (error: any) {
-      console.error('[Contacts] Load contacts error:', error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Sync contacts from server (friends, groups, friend requests)
-   */
-  const syncContactsFromServer = async () => {
-    if (!db) {
-      console.log('[Contacts] Database not available');
-      return;
-    }
-
-    setSyncing(true);
-    try {
-      console.log('[Contacts] Syncing contacts from server...');
-
-      // Get current cursors
-      const cursors = await db.collections
-        .get<SyncCursor>('sync_cursors')
-        .query()
-        .fetch();
-
-      const friendCursor = cursors[0]?.friendCursor ?? '0';
-      const groupCursor = cursors[0]?.groupCursor ?? '0';
-      const requestCursor = cursors[0]?.requestCursor ?? '0';
-
-      // Sync from server
-      const result = await syncContacts(friendCursor, groupCursor, requestCursor);
-      console.log('[Contacts] Sync result:', {
-        friendsAdded: result.friends.added.length,
-        friendsUpdated: result.friends.updated.length,
-        groupsAdded: result.groups.added.length,
-        groupsUpdated: result.groups.updated.length,
-        requestsAdded: result.friendRequests.added.length,
-        requestsRemoved: result.friendRequests.removed.length,
-      });
-
-      // Update local database
-      await db.write(async () => {
-        // Helper function to create or update friend
-        const upsertFriend = async (friend: any) => {
-          const existing = await db.collections
-            .get<Friend>('friends')
-            .query(Q.where('friend_id', Q.eq(friend.id)))
-            .fetch();
-
-          if (existing.length > 0) {
-            await existing[0].update((f: Friend) => {
-              f.name = friend.name;
-              f.avatarUrl = friend.avatarUrl || undefined;
-              f.email = friend.email;
-              f.isOnline = friend.isOnline;
-              f.updatedAt = Date.now();
-            });
-          } else {
-            await db.collections.get<Friend>('friends').create((f: Friend) => {
-              f.friendId = friend.id;
-              f.name = friend.name;
-              f.avatarUrl = friend.avatarUrl || undefined;
-              f.email = friend.email;
-              f.isOnline = friend.isOnline;
-              f.createdAt = Date.now();
-              f.updatedAt = Date.now();
-            });
-          }
-        };
-
-        // Helper function to create or update group
-        const upsertGroup = async (group: any) => {
-          const existing = await db.collections
-            .get<Group>('groups')
-            .query(Q.where('group_id', Q.eq(group.id)))
-            .fetch();
-
-          if (existing.length > 0) {
-            await existing[0].update((g: Group) => {
-              g.name = group.name;
-              g.avatarUrl = group.avatarUrl || undefined;
-              g.ownerId = group.ownerId;
-              g.memberIds = JSON.stringify(group.memberIds);
-              g.updatedAt = Date.now();
-            });
-          } else {
-            await db.collections.get<Group>('groups').create((g: Group) => {
-              g.groupId = group.id;
-              g.name = group.name;
-              g.avatarUrl = group.avatarUrl || undefined;
-              g.ownerId = group.ownerId;
-              g.memberIds = JSON.stringify(group.memberIds);
-              g.createdAt = Date.now();
-              g.updatedAt = Date.now();
-            });
-          }
-        };
-
-        // Helper function to create or update group member
-        const upsertGroupMember = async (groupId: string, member: any) => {
-          const existing = await db.collections
-            .get<GroupMember>('group_members')
-            .query(Q.and(
-              Q.where('group_id', Q.eq(groupId)),
-              Q.where('user_id', Q.eq(member.userId))
-            ))
-            .fetch();
-
-          if (existing.length > 0) {
-            await existing[0].update((m: GroupMember) => {
-              m.name = member.name;
-              m.avatarUrl = member.avatarUrl || undefined;
-              m.role = member.role;
-              m.updatedAt = Date.now();
-            });
-          } else {
-            await db.collections.get<GroupMember>('group_members').create((m: GroupMember) => {
-              m.groupId = groupId;
-              m.userId = member.userId;
-              m.name = member.name;
-              m.avatarUrl = member.avatarUrl || undefined;
-              m.role = member.role;
-              m.joinedAt = Date.now();
-              m.createdAt = Date.now();
-              m.updatedAt = Date.now();
-            });
-          }
-        };
-
-        // Update friends (added and updated)
-        for (const friend of [...result.friends.added, ...result.friends.updated]) {
-          await upsertFriend(friend);
-        }
-
-        // Update groups (added and updated)
-        for (const group of [...result.groups.added, ...result.groups.updated]) {
-          await upsertGroup(group);
-          
-          // Update group members
-          if (group.members && group.members.length > 0) {
-            for (const member of group.members) {
-              await upsertGroupMember(group.id, member);
-            }
-          }
-        }
-
-        // Update cursors
-        if (cursors.length > 0) {
-          await cursors[0].update((c: SyncCursor) => {
-            c.friendCursor = result.newFriendCursor;
-            c.groupCursor = result.newGroupCursor;
-            c.requestCursor = result.newRequestCursor;
-          });
-        } else {
-          await db.collections.get<SyncCursor>('sync_cursors').create((c: SyncCursor) => {
-            c.friendCursor = result.newFriendCursor;
-            c.groupCursor = result.newGroupCursor;
-            c.requestCursor = result.newRequestCursor;
-          });
-        }
-      });
-
-      console.log('[Contacts] Contacts synced successfully');
-      loadContacts(); // Reload local data
-    } catch (error: any) {
-      console.error('[Contacts] Sync contacts error:', error.message);
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   /**
    * Handle friend press - navigate to chat
@@ -701,8 +589,6 @@ const ContactsScreen = () => {
         renderItem={renderItem}
         keyExtractor={(item) => item.key}
         contentContainerStyle={styles.listContent}
-        refreshing={syncing}
-        onRefresh={syncContactsFromServer}
       />
     </SafeAreaView>
   );
@@ -844,9 +730,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   friendAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 50,
+    height: 50,
+    borderRadius: 8,
     marginRight: 12,
   },
   friendInfo: {

@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, StyleSheet } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { useDatabase } from '@nozbe/watermelondb/hooks';
+import { useWebSocket } from '../contexts/WebSocketContext';
 import MainScreen from '../screens/MainScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import ContactsScreen from '../screens/ContactsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import { friendRequestService } from '../services/FriendRequestService';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -41,6 +44,36 @@ const DiscoverScreen = () => (
 
 // Main Tab Navigator Component
 const MainTabNavigator = () => {
+  const db = useDatabase();
+  const { onMessage } = useWebSocket();
+  const [unreadFriendRequests, setUnreadFriendRequests] = useState(0);
+
+  // 初始化好友申请服务并监听未读数
+  useEffect(() => {
+    if (!db) {
+      return;
+    }
+
+    // 设置数据库
+    friendRequestService.setDatabase(db);
+
+    // 获取初始未读数（延迟执行确保数据库已准备好）
+    setTimeout(() => {
+      friendRequestService.getUnreadCount().then(setUnreadFriendRequests);
+    }, 200);
+
+    // 添加未读数监听器
+    const unsubscribeCount = friendRequestService.addUnreadCountListener(setUnreadFriendRequests);
+
+    // 启动 WebSocket 监听
+    friendRequestService.startWebSocketListener(onMessage);
+
+    return () => {
+      unsubscribeCount();
+      friendRequestService.stopWebSocketListener();
+    };
+  }, [db, onMessage]);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -72,7 +105,10 @@ const MainTabNavigator = () => {
       <Tab.Screen
         name="Contacts"
         component={ContactsStack}
-        options={{ title: '通讯录' }}
+        options={{
+          title: '通讯录',
+          tabBarBadge: unreadFriendRequests > 0 ? unreadFriendRequests : undefined,
+        }}
       />
       <Tab.Screen
         name="Discover"

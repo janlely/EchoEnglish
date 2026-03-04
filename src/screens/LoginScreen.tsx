@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { ApiService } from '../services/ApiService';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { useTheme } from '../hooks/useTheme';
+
 type LoginStackParamList = {
   Login: undefined;
   Register: undefined;
@@ -24,6 +26,7 @@ type LoginScreenNavigationProp = StackNavigationProp<LoginStackParamList, 'Login
 
 const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) => {
   const { user, login, loading: authLoading } = useAuth();
+  const { colors, spacing, typography, shadows } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -102,7 +105,7 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -112,22 +115,22 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
           keyboardShouldPersistTaps="handled"
         >
           {/* Logo 和标题 */}
-          <View style={styles.header}>
-            <View style={styles.logoContainer}>
+          <View style={[styles.header, { marginBottom: spacing['3xl'] }]}>
+            <View style={[styles.logoContainer, { backgroundColor: colors.primary, borderRadius: 40, marginBottom: spacing.md }]}>
               <Text style={styles.logoText}>💬</Text>
             </View>
-            <Text style={styles.title}>EchoEnglish</Text>
-            <Text style={styles.subtitle}>智能英语聊天助手</Text>
+            <Text style={[styles.title, { color: colors.textPrimary }]}>EchoEnglish</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>智能英语聊天助手</Text>
           </View>
 
           {/* 登录表单 */}
           <View style={styles.form}>
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>邮箱</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>邮箱</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder="请输入邮箱"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textTertiary}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -138,11 +141,11 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>密码</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>密码</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder="请输入密码"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textTertiary}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -151,37 +154,37 @@ const LoginScreen = ({ navigation }: { navigation: LoginScreenNavigationProp }) 
             </View>
 
             <TouchableOpacity
-              style={[styles.loginButton, loginLoading && styles.loginButtonDisabled]}
+              style={[styles.loginButton, { backgroundColor: colors.primary }, loginLoading && { backgroundColor: colors.textDisabled }]}
               onPress={handleLogin}
               disabled={loginLoading}
             >
-              <Text style={styles.loginButtonText}>
+              <Text style={[styles.loginButtonText, { color: colors.white }]}>
                 {loginLoading ? '登录中...' : '登录'}
               </Text>
             </TouchableOpacity>
 
             {/* 分隔线 */}
             <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>或</Text>
-              <View style={styles.dividerLine} />
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+              <Text style={[styles.dividerText, { color: colors.textTertiary }]}>或</Text>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
             </View>
 
             {/* Google 登录按钮 */}
             <TouchableOpacity
-              style={[styles.googleButton, loginLoading && styles.googleButtonDisabled]}
+              style={[styles.googleButton, { borderColor: colors.border }, loginLoading && { opacity: 0.5 }]}
               onPress={handleGoogleLogin}
               disabled={loginLoading}
             >
-              <Text style={styles.googleButtonText}>G</Text>
-              <Text style={styles.googleButtonText}>使用 Google 账号登录</Text>
+              <Text style={[styles.googleButtonText, { color: colors.textPrimary }]}>G</Text>
+              <Text style={[styles.googleButtonText, { color: colors.textPrimary }]}>使用 Google 账号登录</Text>
             </TouchableOpacity>
 
             {/* 注册链接 */}
             <View style={styles.footer}>
-              <Text style={styles.footerText}>还没有账号？</Text>
+              <Text style={[styles.footerText, { color: colors.textSecondary }]}>还没有账号？</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-                <Text style={styles.registerLink}>立即注册</Text>
+                <Text style={[styles.registerLink, { color: colors.primary }]}>立即注册</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -245,27 +248,24 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#F9FAFB',
   },
   loginButton: {
-    backgroundColor: '#007AFF',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 10,
   },
   loginButtonDisabled: {
-    backgroundColor: '#99C9FF',
+    opacity: 0.5,
   },
   loginButtonText: {
-    color: '#ffffff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   divider: {
     flexDirection: 'row',
@@ -275,30 +275,26 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#e0e0e0',
   },
   dividerText: {
     marginHorizontal: 16,
-    color: '#999',
     fontSize: 14,
   },
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
     borderRadius: 12,
     paddingVertical: 14,
     gap: 10,
   },
   googleButtonDisabled: {
-    backgroundColor: '#f5f5f5',
+    opacity: 0.5,
   },
   googleButtonText: {
     fontSize: 16,
-    color: '#333',
+    marginHorizontal: 8,
   },
   footer: {
     flexDirection: 'row',
@@ -307,11 +303,9 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 14,
-    color: '#666',
   },
   registerLink: {
     fontSize: 14,
-    color: '#007AFF',
     fontWeight: '600',
     marginLeft: 4,
   },

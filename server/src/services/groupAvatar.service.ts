@@ -13,15 +13,13 @@ interface AvatarPosition {
 
 class GroupAvatarService {
   private readonly avatarSize = 100; // Each avatar size
-  private readonly gap = 2; // Gap between avatars
-  private readonly outputSize = 300; // 3x3 grid output size
+  private readonly gap = 5; // Gap between avatars (increased from 2 to 5)
 
   /**
    * Get grid layout based on member count
    */
-  private getGridLayout(memberCount: number): { cols: number; rows: number; positions: AvatarPosition[] } {
+  private getGridLayout(memberCount: number): { cols: number; rows: number; positions: AvatarPosition[], outputWidth: number, outputHeight: number } {
     const positions: AvatarPosition[] = [];
-    const cellSize = this.avatarSize;
 
     // Determine grid size based on member count
     let cols = 1;
@@ -47,25 +45,23 @@ class GroupAvatarService {
       rows = 3;
     }
 
-    // Calculate starting offset to center the grid
-    const totalWidth = cols * cellSize + (cols - 1) * this.gap;
-    const totalHeight = rows * cellSize + (rows - 1) * this.gap;
-    const startX = (this.outputSize - totalWidth) / 2;
-    const startY = (this.outputSize - totalHeight) / 2;
+    // Calculate the output size based on grid dimensions and gaps
+    const outputWidth = cols * this.avatarSize + (cols - 1) * this.gap;
+    const outputHeight = rows * this.avatarSize + (rows - 1) * this.gap;
 
     // Generate positions for each member
     for (let i = 0; i < Math.min(memberCount, 9); i++) {
       const col = i % cols;
       const row = Math.floor(i / cols);
       positions.push({
-        x: startX + col * (cellSize + this.gap),
-        y: startY + row * (cellSize + this.gap),
-        width: cellSize,
-        height: cellSize,
+        x: col * (this.avatarSize + this.gap),
+        y: row * (this.avatarSize + this.gap),
+        width: this.avatarSize,
+        height: this.avatarSize,
       });
     }
 
-    return { cols, rows, positions };
+    return { cols, rows, positions, outputWidth, outputHeight };
   }
 
   /**
@@ -75,22 +71,22 @@ class GroupAvatarService {
     try {
       // Handle relative URLs
       const fullUrl = url.startsWith('http') ? url : `http://localhost:3000${url}`;
-      
+
       const response = await fetch(fullUrl);
       if (!response.ok) {
         throw new Error(`Failed to download avatar: ${response.status}`);
       }
-      
+
       const buffer = Buffer.from(await response.arrayBuffer());
-      
-      // Resize and crop to square
+
+      // Resize and crop to square, ensuring it fills the allocated space
       const processed = await sharp(buffer)
         .resize(this.avatarSize, this.avatarSize, {
-          fit: 'cover',
+          fit: 'cover', // Cover ensures the image fills the entire space
           position: 'center',
         })
         .toBuffer();
-      
+
       return processed;
     } catch (error: any) {
       logger.error('[GroupAvatarService] Download avatar error:', error.message);
@@ -152,6 +148,18 @@ class GroupAvatarService {
         }
       }
 
+      // Create a white background canvas first with dynamic size
+      const backgroundCanvas = await sharp({
+        create: {
+          width: layout.outputWidth,
+          height: layout.outputHeight,
+          channels: 3, // RGB (no alpha for white background)
+          background: { r: 255, g: 255, b: 255 }, // White background
+        },
+      })
+      .png()
+      .toBuffer();
+
       // Create composite image
       const compositeInputs = avatarBuffers.map(({ buffer, position }) => ({
         input: buffer,
@@ -159,20 +167,8 @@ class GroupAvatarService {
         left: position.x,
       }));
 
-      // Create white background
-      const background = await sharp({
-        create: {
-          width: this.outputSize,
-          height: this.outputSize,
-          channels: 3,
-          background: { r: 255, g: 255, b: 255 },
-        },
-      })
-      .png()
-      .toBuffer();
-
-      // Composite all avatars
-      const result = await sharp(background)
+      // Composite all avatars onto the white background
+      const result = await sharp(backgroundCanvas)
         .composite(compositeInputs)
         .png()
         .toBuffer();

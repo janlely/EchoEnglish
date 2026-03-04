@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { useTheme } from '../hooks/useTheme';
 
 type RegisterStackParamList = {
   Register: undefined;
@@ -23,6 +24,7 @@ type RegisterScreenNavigationProp = StackNavigationProp<RegisterStackParamList, 
 
 const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationProp }) => {
   const { register } = useAuth();
+  const { colors, spacing, typography } = useTheme();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -79,7 +81,7 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -89,19 +91,19 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
           keyboardShouldPersistTaps="handled"
         >
           {/* 标题 */}
-          <View style={styles.header}>
-            <Text style={styles.title}>创建账号</Text>
-            <Text style={styles.subtitle}>注册后即可开始使用 EchoEnglish</Text>
+          <View style={[styles.header, { marginBottom: spacing['3xl'] }]}>
+            <Text style={[styles.title, { color: colors.textPrimary, ...typography.title1 }]}>创建账号</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>注册后即可开始使用 EchoEnglish</Text>
           </View>
 
           {/* 注册表单 */}
           <View style={styles.form}>
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>昵称</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>昵称</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder="请输入昵称"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textTertiary}
                 value={name}
                 onChangeText={setName}
                 editable={!loading}
@@ -109,11 +111,11 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>邮箱</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>邮箱</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder="请输入邮箱"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textTertiary}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -124,11 +126,11 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>密码</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>密码</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder="请输入密码（至少 6 位）"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textTertiary}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -137,11 +139,11 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>确认密码</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>确认密码</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.border, color: colors.textPrimary }]}
                 placeholder="请再次输入密码"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.textTertiary}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 secureTextEntry
@@ -150,20 +152,20 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
             </View>
 
             <TouchableOpacity
-              style={[styles.registerButton, loading && styles.registerButtonDisabled]}
+              style={[styles.registerButton, { backgroundColor: colors.primary }, loading && { backgroundColor: colors.textDisabled }]}
               onPress={handleRegister}
               disabled={loading}
             >
-              <Text style={styles.registerButtonText}>
+              <Text style={[styles.registerButtonText, { color: colors.white }]}>
                 {loading ? '注册中...' : '注册'}
               </Text>
             </TouchableOpacity>
 
             {/* 登录链接 */}
             <View style={styles.footer}>
-              <Text style={styles.footerText}>已有账号？</Text>
+              <Text style={[styles.footerText, { color: colors.textSecondary }]}>已有账号？</Text>
               <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-                <Text style={styles.loginLink}>立即登录</Text>
+                <Text style={[styles.loginLink, { color: colors.primary }]}>立即登录</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -176,7 +178,6 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
   },
   keyboardView: {
     flex: 1,
@@ -189,17 +190,14 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
   },
   form: {
     width: '100%',
@@ -209,33 +207,29 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    color: '#333',
     marginBottom: 8,
     fontWeight: '500',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#F9FAFB',
   },
   registerButton: {
-    backgroundColor: '#007AFF',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 10,
   },
   registerButtonDisabled: {
-    backgroundColor: '#99C9FF',
+    opacity: 0.5,
   },
   registerButtonText: {
-    color: '#ffffff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   footer: {
     flexDirection: 'row',
@@ -244,11 +238,9 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 14,
-    color: '#666',
   },
   loginLink: {
     fontSize: 14,
-    color: '#007AFF',
     fontWeight: '600',
     marginLeft: 4,
   },

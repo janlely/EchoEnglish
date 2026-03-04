@@ -180,6 +180,36 @@ class ContactController {
       next(error);
     }
   }
+
+  /**
+   * 更新群组名称
+   */
+  async updateGroupName(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const { groupId } = req.params;
+      const { name } = req.body;
+
+      if (!name) {
+        res.status(400).json({
+          success: false,
+          error: 'Group name is required',
+        });
+        return;
+      }
+
+      const updatedGroup = await contactService.updateGroupName(groupId, name, userId);
+
+      res.status(200).json({
+        success: true,
+        data: { group: updatedGroup },
+        message: 'Group name updated successfully',
+      });
+    } catch (error: any) {
+      logger.error('Update group name controller error:', error);
+      next(error);
+    }
+  }
 }
 
 export default new ContactController();

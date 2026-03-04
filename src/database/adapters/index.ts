@@ -1,6 +1,7 @@
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
 
 import { schema } from '../schema';
+import { migrations } from '../migrations';
 
 // Global variable to store the user-specific database name
 let userDbName = 'echoenglish';
@@ -9,8 +10,8 @@ let userDbName = 'echoenglish';
 export const setUserDbName = (userId: string) => {
   // Sanitize userId to ensure it's safe for file names
   const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  // Use fixed database name with schema version for cache busting
-  userDbName = `echoenglish_user_${safeUserId}_v${schema.version}`;
+  // Use fixed database name per user (migrations will handle schema updates)
+  userDbName = `echoenglish_user_${safeUserId}`;
   console.log('[Database] Set user DB name:', userDbName, 'Schema version:', schema.version);
 };
 
@@ -23,6 +24,7 @@ export const createAdapter = () => {
   return new SQLiteAdapter({
     schema,
     dbName: userDbName,
+    migrations,
   });
 };
 

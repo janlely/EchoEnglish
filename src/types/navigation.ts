@@ -9,6 +9,10 @@ export type ChatStackParamList = {
     chatName: string;
     chatType?: 'direct' | 'group';
   };
+  GroupDetail: {
+    groupId: string;
+    groupName: string;
+  };
   SearchUser: undefined;
   FriendRequests: undefined;
   Contacts: undefined;
@@ -26,6 +30,7 @@ export type MainTabParamList = {
 export type MainScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'MainChat'>;
 export type ContactsScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'Contacts'>;
 export type ChatDetailScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'ChatDetail'>;
+export type GroupDetailScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'GroupDetail'>;
 export type SearchUserScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'SearchUser'>;
 export type FriendRequestsScreenNavigationProp = StackNavigationProp<ChatStackParamList, 'FriendRequests'>;
 export type ProfileScreenNavigationProp = StackNavigationProp<MainTabParamList, 'Profile'>;
