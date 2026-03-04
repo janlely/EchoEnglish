@@ -6,11 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { Conversation, Friend, Group } from '../database/models';
+import { Conversation, Friend, Group, Message } from '../database/models';
 import { MainScreenNavigationProp } from '../types/navigation';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { getConversationsWithUnread } from '../api/conversations';
@@ -18,6 +19,7 @@ import { syncContacts, getGroupInfo } from '../api/contacts';
 import { getAvatarUrl } from '../utils/avatar';
 import logger from '../utils/logger';
 import BubbleMenu from '../components/BubbleMenu';
+import ConversationActionMenu, { ConversationMenuAction } from '../components/ConversationActionMenu';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -30,20 +32,27 @@ interface ChatSessionInterface {
   timestamp?: string;
   unreadCount: number;
   latestMsgId?: string;
+  isPinned?: boolean;
 }
 
 // Chat Session Item Component
 const ChatSessionItem = ({
   session,
-  onPress
+  onPress,
+  onLongPress,
+  onRef,
 }: {
   session: ChatSessionInterface;
-  onPress: (conversationId: string) => void
+  onPress: (conversationId: string) => void;
+  onLongPress?: () => void;
+  onRef?: (ref: View | null) => void;
 }) => {
   return (
     <TouchableOpacity
-      style={styles.chatItemContainer}
+      ref={onRef}
+      style={[styles.chatItemContainer, session.isPinned && styles.pinnedItem]}
       onPress={() => onPress(session.conversationId)}
+      onLongPress={onLongPress}
     >
       {/* Avatar */}
       <View style={styles.avatarContainer}>
@@ -56,7 +65,10 @@ const ChatSessionItem = ({
       {/* Chat Info */}
       <View style={styles.chatInfoContainer}>
         <View style={styles.topRow}>
-          <Text style={styles.chatName}>{session.name}</Text>
+          <View style={styles.nameRow}>
+            {session.isPinned && <Text style={styles.pinIcon}>📌 </Text>}
+            <Text style={styles.chatName}>{session.name}</Text>
+          </View>
           {session.timestamp && (
             <Text style={styles.timestamp}>{session.timestamp}</Text>
           )}
@@ -88,6 +100,13 @@ const MainScreen = () => {
   const [menuVisible, setMenuVisible] = useState(false);
   const menuButtonRef = useRef<View>(null);
   const database = useDatabase();
+
+  // Conversation action menu state
+  const [showConversationActionMenu, setShowConversationActionMenu] = useState(false);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedConversationIsPinned, setSelectedConversationIsPinned] = useState(false);
+  const [anchorPosition, setAnchorPosition] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const itemRefs = useRef<Map<string, View>>(new Map());
 
   /**
    * Sync conversations with unread messages from server
@@ -242,9 +261,17 @@ const MainScreen = () => {
               : undefined,
             unreadCount: conv.unreadCount || 0,
             latestMsgId: conv.latestMsgId,
+            isPinned: conv.isPinned || false,
           };
         })
       );
+
+      // Sort: pinned first, then by updated_at (timestamp)
+      formattedSessions.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return 0; // Keep original order (already sorted by updated_at)
+      });
 
       setChatSessions(formattedSessions);
     } catch (error: any) {
@@ -322,10 +349,127 @@ const MainScreen = () => {
     }
   };
 
+  /**
+   * Handle conversation item long press
+   */
+  const handleConversationLongPress = (conversationId: string) => {
+    const session = chatSessions.find(s => s.conversationId === conversationId);
+    if (!session) return;
+
+    setSelectedConversationId(conversationId);
+    setSelectedConversationIsPinned(session.isPinned || false);
+
+    // Get the ref from map and measure position
+    const ref = itemRefs.current.get(conversationId) || null;
+    if (ref) {
+      ref.measureInWindow((x, y, width, height) => {
+        setAnchorPosition({ x, y, width, height });
+      });
+    }
+
+    setShowConversationActionMenu(true);
+  };
+
+  /**
+   * Handle conversation menu action
+   */
+  const handleConversationAction = (action: ConversationMenuAction) => {
+    if (!selectedConversationId || !database) return;
+
+    // Close menu first
+    setShowConversationActionMenu(false);
+
+    if (action === 'pin' || action === 'unpin') {
+      // Update pin status
+      database.write(async () => {
+        const conversations = await database.collections
+          .get<Conversation>('conversations')
+          .query(Q.where('conversation_id', Q.eq(selectedConversationId)))
+          .fetch();
+
+        if (conversations.length > 0) {
+          await conversations[0].update((c: Conversation) => {
+            c.isPinned = action === 'pin';
+            c.updatedAt = Date.now();
+          });
+          logger.info('MainScreen', action === 'pin' ? 'Pinned conversation' : 'Unpinned conversation', selectedConversationId);
+          await loadChatSessionsFromLocal();
+        }
+      }).catch((error) => {
+        logger.error('MainScreen', 'Failed to update pin status:', error);
+        Alert.alert('错误', '操作失败，请重试');
+      });
+      setSelectedConversationId(null);
+      setAnchorPosition(null);
+    } else if (action === 'delete') {
+      Alert.alert(
+        '删除聊天',
+        `确定要删除与 ${chatSessions.find(s => s.conversationId === selectedConversationId)?.name} 的聊天记录吗？`,
+        [
+          {
+            text: '取消',
+            style: 'cancel',
+            onPress: () => {
+              setSelectedConversationId(null);
+              setAnchorPosition(null);
+            },
+          },
+          {
+            text: '删除',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await database.write(async () => {
+                  // Delete all messages for this conversation
+                  const messages = await database.collections
+                    .get<Message>('messages')
+                    .query(Q.where('conversation_id', Q.eq(selectedConversationId)))
+                    .fetch();
+
+                  for (const msg of messages) {
+                    await msg.destroyPermanently();
+                  }
+
+                  // Delete the conversation record
+                  const conversations = await database.collections
+                    .get<Conversation>('conversations')
+                    .query(Q.where('conversation_id', Q.eq(selectedConversationId)))
+                    .fetch();
+
+                  for (const conv of conversations) {
+                    await conv.destroyPermanently();
+                  }
+                });
+
+                logger.info('MainScreen', 'Deleted conversation and messages:', selectedConversationId);
+                await loadChatSessionsFromLocal();
+              } catch (error) {
+                logger.error('MainScreen', 'Failed to delete conversation:', error);
+                Alert.alert('错误', '删除失败，请重试');
+              } finally {
+                setSelectedConversationId(null);
+                setAnchorPosition(null);
+              }
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+    }
+  };
+
   const renderChatItem = ({ item }: { item: ChatSessionInterface }) => (
     <ChatSessionItem
       session={item}
       onPress={handleChatPress}
+      onLongPress={() => handleConversationLongPress(item.conversationId)}
+      onRef={(ref) => {
+        if (ref) {
+          itemRefs.current.set(item.conversationId, ref);
+        } else {
+          itemRefs.current.delete(item.conversationId);
+        }
+      }}
     />
   );
 
@@ -370,6 +514,22 @@ const MainScreen = () => {
           },
         ]}
       />
+
+      {/* Conversation Action Menu */}
+      {showConversationActionMenu && selectedConversationId && (
+        <ConversationActionMenu
+          visible={showConversationActionMenu}
+          conversationId={selectedConversationId}
+          isPinned={selectedConversationIsPinned}
+          onPress={handleConversationAction}
+          onClose={() => {
+            setSelectedConversationId(null);
+            setAnchorPosition(null);
+          }}
+          anchorRef={itemRefs.current.has(selectedConversationId) ? { current: itemRefs.current.get(selectedConversationId) } : undefined}
+          anchorPosition={anchorPosition || undefined}
+        />
+      )}
     </View>
   );
 };
@@ -396,6 +556,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  pinnedItem: {
+    backgroundColor: '#f0f7ff',
   },
   avatarContainer: {
     position: 'relative',
@@ -426,6 +589,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 4,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pinIcon: {
+    fontSize: 14,
   },
   chatName: {
     fontSize: 16,

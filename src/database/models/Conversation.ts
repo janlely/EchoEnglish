@@ -28,6 +28,9 @@ export default class Conversation extends Model {
   @field('unread_count')
   unreadCount?: number;
 
+  @field('is_pinned')
+  isPinned!: boolean;
+
   @date('created_at')
   createdAt!: number;
 
