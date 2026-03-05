@@ -19,7 +19,6 @@ build/
 *.db
 *.sqlite
 *.sqlite3
-prisma/migrations/
 
 # Logs
 logs/
