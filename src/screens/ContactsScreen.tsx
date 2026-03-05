@@ -223,37 +223,48 @@ const ContactsScreen = () => {
       return;
     }
 
+    const startTime = Date.now();
+    console.log('[Contacts] Start loading contacts...');
     setLoading(true);
     try {
       console.log('[Contacts] Loading contacts from local database...');
 
       // 执行增量同步（失败也不影响后续加载）
+      const syncStart = Date.now();
       try {
         await contactSyncService.syncContacts();
+        console.log(`[Contacts] Sync completed in ${Date.now() - syncStart}ms`);
       } catch (syncError) {
         console.warn('[Contacts] Sync failed, loading from local cache:', syncError);
       }
 
       // 同步好友申请（失败也不影响后续加载）
+      const requestSyncStart = Date.now();
       try {
         await friendRequestService.syncPendingRequests();
+        console.log(`[Contacts] Friend request sync completed in ${Date.now() - requestSyncStart}ms`);
       } catch (syncError) {
         console.warn('[Contacts] Friend request sync failed:', syncError);
       }
 
       // 从本地数据库加载好友
+      const loadFriendsStart = Date.now();
       const dbFriends = await db.collections
         .get<Friend>('friends')
         .query(Q.sortBy('name', Q.asc))
         .fetch();
+      console.log(`[Contacts] Load friends from DB completed in ${Date.now() - loadFriendsStart}ms, found ${dbFriends.length} friends`);
 
       // 从本地数据库加载群组
+      const loadGroupsStart = Date.now();
       const dbGroups = await db.collections
         .get<Group>('groups')
         .query(Q.sortBy('name', Q.asc))
         .fetch();
+      console.log(`[Contacts] Load groups from DB completed in ${Date.now() - loadGroupsStart}ms, found ${dbGroups.length} groups`);
 
       // 获取群成员数量
+      const memberCountStart = Date.now();
       const groupsWithCount = await Promise.all(
         dbGroups.map(async (group) => {
           try {
@@ -278,7 +289,9 @@ const ContactsScreen = () => {
           }
         })
       );
+      console.log(`[Contacts] Load group member counts completed in ${Date.now() - memberCountStart}ms`);
 
+      const setStateStart = Date.now();
       setFriends(
         dbFriends.map((f) => ({
           id: f.friendId,
@@ -292,14 +305,19 @@ const ContactsScreen = () => {
       setGroups(groupsWithCount);
 
       // 加载好友申请
+      const fetchRequestsStart = Date.now();
       await fetchFriendRequests();
+      console.log(`[Contacts] Fetch friend requests completed in ${Date.now() - fetchRequestsStart}ms`);
 
-      console.log('[Contacts] Loaded', dbFriends.length, 'friends and', groupsWithCount.length, 'groups');
+      console.log(`[Contacts] Set state completed in ${Date.now() - setStateStart}ms`);
+      console.log(`[Contacts] Loaded ${dbFriends.length} friends and ${groupsWithCount.length} groups`);
+      console.log(`[Contacts] Total loadContacts completed in ${Date.now() - startTime}ms`);
     } catch (error: any) {
       console.error('[Contacts] Load contacts error:', error.message);
     } finally {
       setLoading(false);
       setSyncing(false);
+      console.log(`[Contacts] Loading finished, total time: ${Date.now() - startTime}ms`);
     }
   };
 
@@ -307,8 +325,10 @@ const ContactsScreen = () => {
    * 获取好友请求列表
    */
   const fetchFriendRequests = async () => {
+    const startTime = Date.now();
     try {
       const token = await getAuthToken();
+      const fetchStart = Date.now();
       const response = await fetch(`${API_CONFIG.BASE_URL}/api/friends/requests`, {
         method: 'GET',
         headers: {
@@ -316,11 +336,17 @@ const ContactsScreen = () => {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
+      console.log(`[Contacts] Friend requests fetch network completed in ${Date.now() - fetchStart}ms`);
 
+      const parseStart = Date.now();
       const data: any = await response.json();
+      console.log(`[Contacts] Friend requests parse JSON completed in ${Date.now() - parseStart}ms`);
+
       if (response.ok && data.success) {
         setFriendRequests(data.data.requests);
+        console.log(`[Contacts] Set friend requests state, count: ${data.data.requests.length}`);
       }
+      console.log(`[Contacts] fetchFriendRequests total completed in ${Date.now() - startTime}ms`);
     } catch (error: any) {
       console.error('[Contacts] Fetch friend requests error:', error.message);
     }

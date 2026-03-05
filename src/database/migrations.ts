@@ -4,6 +4,20 @@ import { schemaMigrations } from '@nozbe/watermelondb/Schema/migrations';
 // When incrementing schema version in schema.ts, add migration here
 export const migrations = schemaMigrations({
   migrations: [
+    // Migration from schema version 9 to 10
+    // Adds is_pinned column to conversations table for pinning conversations
+    {
+      toVersion: 10,
+      steps: [
+        {
+          type: 'add_columns',
+          table: 'conversations',
+          columns: [
+            { name: 'is_pinned', type: 'boolean', isOptional: true },
+          ],
+        },
+      ],
+    },
     // Migration from schema version 8 to 9
     // Adds friend_requests table for friend request management
     {

@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 9, // Increment for friend_requests table
+  version: 10, // Added is_pinned field to conversations table
   tables: [
     // ===== User tables =====
 
@@ -107,6 +107,7 @@ export const schema = appSchema({
         { name: 'latest_sender_id', type: 'string', isOptional: true },
         { name: 'latest_timestamp', type: 'number', isOptional: true },
         { name: 'unread_count', type: 'number', isOptional: true },
+        { name: 'is_pinned', type: 'boolean' },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
         // Note: name and avatar_url are removed - fetch from friends/groups tables

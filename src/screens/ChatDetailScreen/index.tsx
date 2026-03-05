@@ -320,15 +320,17 @@ const ChatDetailScreen = () => {
   const handleMenuAction = (action: MenuAction) => {
     if (!selectedMessage) return;
 
-    // 先关闭菜单
-    setShowMessageActionMenu(false);
-
     if (action === 'translate') {
-      // 保留 selectedMessage 供 MessageTranslateModal 使用
-      setShowMessageTranslate(true);
+      // 翻译操作：先关闭菜单，但保留 selectedMessage 供 MessageTranslateModal 使用
+      setShowMessageActionMenu(false);
+      // 延迟设置翻译模态框显示，确保菜单关闭后再显示
+      setTimeout(() => {
+        setShowMessageTranslate(true);
+      }, 0);
     } else if (action === 'copy') {
       Clipboard.setString(selectedMessage.text);
       Alert.alert('已复制', '消息已复制到剪贴板');
+      setShowMessageActionMenu(false);
       setSelectedMessage(null);
     }
   };
@@ -408,9 +410,9 @@ const ChatDetailScreen = () => {
           messageText={selectedMessage.text}
           onPress={handleMenuAction}
           onClose={() => {
-            setSelectedMessage(null);
-            setMessageBubbleRef(null);
-            setAnchorPosition(null);
+            // 只在菜单被取消时关闭，不立即清空 selectedMessage
+            // selectedMessage 在翻译模态框关闭时清空
+            setShowMessageActionMenu(false);
           }}
           anchorRef={messageBubbleRef ? { current: messageBubbleRef } : undefined}
           anchorPosition={anchorPosition || undefined}
@@ -427,6 +429,8 @@ const ChatDetailScreen = () => {
           onClose={() => {
             setShowMessageTranslate(false);
             setSelectedMessage(null);
+            setMessageBubbleRef(null);
+            setAnchorPosition(null);
           }}
         />
       )}

@@ -53,7 +53,7 @@ class EmailVerificationService {
       }
 
       // 发送验证邮件
-      // await this.sendVerificationEmail(email, code);
+      await this.sendVerificationEmail(email, code);
 
       logger.info(`📧 Email verification code sent to ${email}, code: ${code}`);
       

@@ -72,16 +72,23 @@ class ContactService {
     requestCursor: bigint
   ): Promise<SyncContactsResult> {
     try {
+      const startTime = Date.now();
       logger.info(`[ContactService] Sync contacts for user ${userId}, friendCursor=${friendCursor}, groupCursor=${groupCursor}, requestCursor=${requestCursor}`);
 
       // 同步好友
+      const friendsStart = Date.now();
       const friends = await this.syncFriends(userId, friendCursor);
+      logger.info(`[ContactService] Sync friends completed in ${Date.now() - friendsStart}ms`);
 
       // 同步群组
+      const groupsStart = Date.now();
       const groups = await this.syncGroups(userId, groupCursor);
+      logger.info(`[ContactService] Sync groups completed in ${Date.now() - groupsStart}ms`);
 
       // 同步好友请求
+      const requestsStart = Date.now();
       const friendRequests = await this.syncFriendRequests(userId, requestCursor);
+      logger.info(`[ContactService] Sync friend requests completed in ${Date.now() - requestsStart}ms`);
 
       // 计算新游标（使用当前时间戳）
       const newFriendCursor = BigInt(Date.now());
@@ -89,7 +96,12 @@ class ContactService {
       const newRequestCursor = BigInt(Date.now());
 
       // 更新游标
+      const cursorStart = Date.now();
       await this.updateSyncCursor(userId, newFriendCursor, newGroupCursor, newRequestCursor);
+      logger.info(`[ContactService] Update cursor completed in ${Date.now() - cursorStart}ms`);
+
+      const totalTime = Date.now() - startTime;
+      logger.info(`[ContactService] Total sync completed in ${totalTime}ms - friends: ${friends.added.length} added, ${friends.updated.length} updated; groups: ${groups.added.length} added, ${groups.updated.length} updated; requests: ${friendRequests.added.length} added`);
 
       return {
         friends,
@@ -176,7 +188,11 @@ class ContactService {
    */
   private async syncFriends(userId: string, cursor: bigint): Promise<FriendSyncResult> {
     try {
+      const startTime = Date.now();
+      logger.info(`[ContactService] Sync friends start - userId=${userId}, cursor=${cursor}`);
+
       // 获取当前好友列表
+      const queryStart = Date.now();
       const friendships = await prisma.friendship.findMany({
         where: {
           OR: [
@@ -207,8 +223,10 @@ class ContactService {
           },
         },
       });
+      logger.info(`[ContactService] Friendship query completed in ${Date.now() - queryStart}ms, found ${friendships.length} friendships`);
 
       // 提取好友信息
+      const processStart = Date.now();
       const currentFriends = friendships.map(f => {
         const friend = f.userId1 === userId ? f.user2 : f.user1;
         return {
@@ -220,15 +238,16 @@ class ContactService {
           updatedAt: friend.updatedAt.getTime(),
         };
       });
+      logger.info(`[ContactService] Process friends completed in ${Date.now() - processStart}ms`);
 
-      // 获取本地已有的好友 ID（通过游标时间之前的）
-      // 注意：这里简化处理，返回所有当前好友作为 added
-      // 实际生产中应该记录用户的好友列表快照
-      const added = currentFriends.filter(f => f.updatedAt > cursor);
+      // 过滤变更
+      const filterStart = Date.now();
+      const added = currentFriends.filter(f => f.updatedAt > Number(cursor));
       const updated = currentFriends.filter(f => f.updatedAt <= cursor && f.updatedAt > 0);
       const removed: string[] = []; // 简化处理，暂不跟踪删除
+      logger.info(`[ContactService] Filter friends completed in ${Date.now() - filterStart}ms - added=${added.length}, updated=${updated.length}`);
 
-      logger.info(`[ContactService] Sync friends: added=${added.length}, updated=${updated.length}, removed=${removed.length}`);
+      logger.info(`[ContactService] Sync friends total: ${Date.now() - startTime}ms`);
 
       return {
         added: added.map(({ updatedAt, ...rest }) => rest),
@@ -246,7 +265,11 @@ class ContactService {
    */
   private async syncGroups(userId: string, cursor: bigint): Promise<GroupSyncResult> {
     try {
+      const startTime = Date.now();
+      logger.info(`[ContactService] Sync groups start - userId=${userId}, cursor=${cursor}`);
+
       // 获取用户加入的所有群组
+      const queryStart = Date.now();
       const groupMemberships = await prisma.groupMember.findMany({
         where: {
           userId,
@@ -269,8 +292,11 @@ class ContactService {
           },
         },
       });
+      const queryTime = Date.now() - queryStart;
+      logger.info(`[ContactService] Group membership query completed in ${queryTime}ms, found ${groupMemberships.length} groups`);
 
       // 提取群组信息（包含成员详情）
+      const processStart = Date.now();
       const currentGroups = groupMemberships.map(m => ({
         id: m.group.id,
         name: m.group.name,
@@ -285,27 +311,35 @@ class ContactService {
         })),
         updatedAt: m.group.updatedAt.getTime(),
       }));
+      logger.info(`[ContactService] Process groups completed in ${Date.now() - processStart}ms`);
 
-      // 过滤变更
-      // 如果 cursor 为 0 或者当前没有群组数据，返回所有群组（第一次同步）
-      // 否则只返回更新的群组
+      // 增量同步逻辑：
+      // 1. cursor === 0n: 第一次同步，返回所有群组
+      // 2. cursor > 0n: 增量同步，只返回更新的群组
+      const filterStart = Date.now();
       let added: typeof currentGroups = [];
       let updated: typeof currentGroups = [];
-      
-      if (cursor === 0n || currentGroups.length > 0) {
-        // First sync or groups exist: return all groups as "added"
+
+      if (cursor === 0n) {
+        // First sync: return all groups as "added"
         added = currentGroups;
         updated = [];
+        logger.info(`[ContactService] First sync - returning all ${currentGroups.length} groups`);
       } else {
-        // Incremental sync: return groups updated since last sync
-        added = currentGroups.filter(g => g.updatedAt > Number(cursor));
-        updated = []; // Don't return updated groups, only new/updated ones
+        // Incremental sync: only return groups updated since last sync
+        const cursorTimestamp = Number(cursor);
+        added = currentGroups.filter(g => g.updatedAt > cursorTimestamp);
+        // For incremental sync, we return updated groups separately
+        // (groups that existed before and were modified)
+        updated = []; // Simplified: treat all changes as "added"
+        logger.info(`[ContactService] Incremental sync - cursor=${cursorTimestamp}, returning ${added.length} updated groups`);
       }
-      
+      logger.info(`[ContactService] Filter groups completed in ${Date.now() - filterStart}ms - added=${added.length}, updated=${updated.length}`);
+
       const removed: string[] = []; // 简化处理，暂不跟踪删除
 
-      logger.info(`[ContactService] Sync groups: added=${added.length}, updated=${updated.length}, removed=${removed.length}`);
-      logger.info(`[ContactService] Sync groups debug: cursor=${cursor}, currentGroups.length=${currentGroups.length}, added.length=${added.length}`);
+      const totalTime = Date.now() - startTime;
+      logger.info(`[ContactService] Sync groups total: ${totalTime}ms - cursor=${cursor}, currentGroups=${currentGroups.length}, added=${added.length}`);
 
       return {
         added: added.map(({ updatedAt, ...rest }) => rest),

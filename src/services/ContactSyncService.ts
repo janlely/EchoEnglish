@@ -39,6 +39,7 @@ export class ContactSyncService {
     }
 
     try {
+      const startTime = Date.now();
       const cursors = await this.database.collections
         .get<SyncCursor>('sync_cursors')
         .query()
@@ -46,12 +47,14 @@ export class ContactSyncService {
 
       if (cursors.length > 0) {
         const cursor = cursors[0];
+        logger.debug('ContactSyncService', `Get sync cursors completed in ${Date.now() - startTime}ms`);
         return {
           friendCursor: cursor.friendCursor,
           groupCursor: cursor.groupCursor,
           requestCursor: cursor.requestCursor,
         };
       }
+      logger.debug('ContactSyncService', `Get sync cursors completed in ${Date.now() - startTime}ms (no cursors found)`);
       return {};
     } catch (error) {
       logger.error('ContactSyncService', 'Get sync cursors error:', error);
@@ -109,8 +112,9 @@ export class ContactSyncService {
     if (!this.database) return true;
 
     try {
+      const startTime = Date.now();
       const cursors = await this.getSyncCursors();
-      
+
       // 如果没有游标，需要全量同步
       if (!cursors.friendCursor && !cursors.groupCursor) {
         logger.debug('ContactSyncService', 'No cursors found, need full sync');
@@ -121,12 +125,14 @@ export class ContactSyncService {
       // 游标是字符串格式的时间戳
       const friendTimestamp = cursors.friendCursor ? parseInt(cursors.friendCursor, 10) : 0;
       const now = Date.now();
-      
-      if (now - friendTimestamp > FULL_SYNC_THRESHOLD) {
-        logger.debug('ContactSyncService', 'Cursors too old, need full sync');
+
+      const isOld = now - friendTimestamp > FULL_SYNC_THRESHOLD;
+      if (isOld) {
+        logger.debug('ContactSyncService', `Cursors too old (${Math.floor((now - friendTimestamp) / 1000 / 60 / 60)}h ago), need full sync`);
         return true;
       }
 
+      logger.debug(`ContactSyncService`, `shouldFullSync check completed in ${Date.now() - startTime}ms: false`);
       return false;
     } catch (error) {
       logger.error('ContactSyncService', 'Check full sync error:', error);
@@ -144,14 +150,19 @@ export class ContactSyncService {
     }
 
     try {
+      const startTime = Date.now();
       logger.info('ContactSyncService', 'Starting contact sync...');
 
       // 检查是否需要全量同步
+      const checkStart = Date.now();
       const needFullSync = await this.shouldFullSync();
-      
+      logger.debug('ContactSyncService', `Check full sync completed in ${Date.now() - checkStart}ms: ${needFullSync}`);
+
       // 获取本地游标
+      const cursorStart = Date.now();
       const cursors = await this.getSyncCursors();
-      
+      logger.debug('ContactSyncService', `Get cursors completed in ${Date.now() - cursorStart}ms`);
+
       // 如果全量同步，不传游标
       const friendCursor = needFullSync ? undefined : cursors.friendCursor;
       const groupCursor = needFullSync ? undefined : cursors.groupCursor;
@@ -161,13 +172,18 @@ export class ContactSyncService {
       logger.debug('ContactSyncService', `Cursors: friend=${friendCursor}, group=${groupCursor}, request=${requestCursor}`);
 
       // 调用增量同步 API
+      const apiStart = Date.now();
+      logger.info('ContactSyncService', 'Calling sync API...');
       const result: SyncContactsResult = await syncContacts(friendCursor, groupCursor, requestCursor);
+      logger.info('ContactSyncService', `API call completed in ${Date.now() - apiStart}ms`);
 
       logger.debug('ContactSyncService', `Sync result: ${result.friends.added.length} new friends, ${result.groups.added.length} new groups`);
 
       // 合并所有保存操作到一个 write 事务中
+      const dbStart = Date.now();
       await this.database.write(async () => {
         // 保存好友
+        const friendsStart = Date.now();
         for (const friend of [...result.friends.added, ...result.friends.updated]) {
           const existing = await this.database!.collections
             .get<Friend>('friends')
@@ -194,8 +210,10 @@ export class ContactSyncService {
             });
           }
         }
+        logger.debug('ContactSyncService', `Save friends completed in ${Date.now() - friendsStart}ms`);
 
         // 保存群组和群成员
+        const groupsStart = Date.now();
         for (const group of [...result.groups.added, ...result.groups.updated]) {
           const existing = await this.database!.collections
             .get<Group>('groups')
@@ -273,8 +291,10 @@ export class ContactSyncService {
             }
           }
         }
+        logger.debug('ContactSyncService', `Save groups completed in ${Date.now() - groupsStart}ms`);
 
         // 保存新游标
+        const cursorSaveStart = Date.now();
         const existingCursors = await this.database!.collections
           .get<SyncCursor>('sync_cursors')
           .query()
@@ -293,9 +313,12 @@ export class ContactSyncService {
             c.requestCursor = result.newRequestCursor || '';
           });
         }
+        logger.debug('ContactSyncService', `Save cursors completed in ${Date.now() - cursorSaveStart}ms`);
       });
+      logger.info('ContactSyncService', `Database write completed in ${Date.now() - dbStart}ms`);
 
-      logger.info('ContactSyncService', 'Contact sync completed');
+      const totalTime = Date.now() - startTime;
+      logger.info('ContactSyncService', `Contact sync completed in ${totalTime}ms`);
     } catch (error) {
       logger.error('ContactSyncService', 'Sync contacts error:', error);
       // Don't throw - allow app to continue even if sync fails
