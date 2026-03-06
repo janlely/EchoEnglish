@@ -1,5 +1,6 @@
 import { API_CONFIG } from '../config/constants';
 import RNFS from 'react-native-fs';
+import logger from './logger';
 
 /**
  * Get the local avatar directory path
@@ -127,6 +128,7 @@ export const getDisplayAvatarUrl = (
 ): string => {
   // Prefer local path if it exists
   if (localPath) {
+    logger.debug('[Avatar] Using local path:', localPath);
     return localPath.startsWith('file://') ? localPath : `file://${localPath}`;
   }
   // Fall back to remote URL
