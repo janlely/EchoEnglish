@@ -11,6 +11,7 @@ interface ChatMessage {
 interface ContextMessage {
   text: string;
   senderId: string;
+  senderName?: string;  // User's display name
   isMe: boolean;
   timestamp: number;
 }
@@ -186,9 +187,9 @@ class OpenRouterService {
     if (options.contextMessages && options.contextMessages.length > 0) {
       const contextText = options.contextMessages
         .filter(msg => msg.text && msg.text.trim() !== '')  // Filter out empty messages
-        .map(msg => `${msg.isMe ? '我' : '对方'}: ${msg.text || ''}`)
+        .map(msg => `${msg.isMe ? '我' : (msg.senderName || msg.senderId)}: ${msg.text || ''}`)
         .join('\n');
-      
+
       // Only add context if there's actual content
       if (contextText && contextText.trim() !== '') {
         messages.push({

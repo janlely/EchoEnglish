@@ -793,6 +793,7 @@ class MessageService {
       const contextMessages = chronologicalMessages.map(msg => ({
         text: msg.text || '',
         senderId: msg.senderId || '',
+        senderName: msg.sender?.name || undefined,
         isMe: msg.senderId === userId,
         timestamp: msg.createdAt ? msg.createdAt.getTime() : Date.now(),
       }));
