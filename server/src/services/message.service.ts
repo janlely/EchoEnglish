@@ -154,8 +154,6 @@ class MessageService {
       );
 
       // Increment unread count for the other participant(s)
-      const isGroup = isGroupConversation(conversationId);
-
       if (!isGroup) {
         const otherUserId = getOtherUserIdFromConversationId(conversationId, senderId);
         if (otherUserId) {
