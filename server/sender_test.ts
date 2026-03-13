@@ -6,7 +6,11 @@
  * the receiver's real-time message handling flow.
  *
  * Usage:
+ *   # Send to direct chat
  *   npm run sender:test -- --email=test@example.com --password=123456 --targetUserId=user123
+ *
+ *   # Send to group chat
+ *   npm run sender:test -- --email=test@example.com --password=123456 --groupId=group123
  *
  * After login, type your message and press Enter to send.
  * Press Ctrl+C to exit.
@@ -38,8 +42,12 @@ args.forEach((arg, index) => {
 const EMAIL = argMap['email'] || process.env.SENDER_EMAIL || '';
 const PASSWORD = argMap['password'] || process.env.SENDER_PASSWORD || '';
 const TARGET_USER_ID = argMap['targetUserId'] || process.env.TARGET_USER_ID || '';
+const GROUP_ID = argMap['groupId'] || process.env.GROUP_ID || '';
 
-if (!EMAIL || !PASSWORD || !TARGET_USER_ID) {
+const CHAT_TYPE = GROUP_ID ? 'group' : 'direct';
+const TARGET_ID = GROUP_ID || TARGET_USER_ID;
+
+if (!EMAIL || !PASSWORD || !TARGET_ID) {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                    Sender Test Script                      ║
@@ -50,16 +58,25 @@ if (!EMAIL || !PASSWORD || !TARGET_USER_ID) {
 ║ Options:                                                   ║
 ║   --email <email>        Sender's email (required)         ║
 ║   --password <password>  Sender's password (required)      ║
-║   --targetUserId <id>    Target user ID to send to        ║
+║   --targetUserId <id>    Target user ID for direct chat   ║
+║   --groupId <id>         Group ID for group chat          ║
+║                                                            ║
+║ Note: Specify either --targetUserId or --groupId           ║
 ║                                                            ║
 ║ Environment Variables:                                     ║
 ║   SENDER_EMAIL                                             ║
 ║   SENDER_PASSWORD                                          ║
 ║   TARGET_USER_ID                                           ║
+║   GROUP_ID                                                 ║
 ║                                                            ║
 ║ Examples:                                                  ║
+║   # Direct chat                                            ║
 ║   npm run sender:test -- --email=test@example.com \\       ║
 ║     --password=123456 --targetUserId=user123               ║
+║                                                            ║
+║   # Group chat                                             ║
+║   npm run sender:test -- --email=test@example.com \\       ║
+║     --password=123456 --groupId=group123                   ║
 ╚═══════════════════════════════════════════════════════════╝
   `);
   process.exit(1);
@@ -80,7 +97,7 @@ let rl: readline.Interface;
  */
 async function login(): Promise<{ accessToken: string; userId: string }> {
   console.log('\n📝 Logging in...');
-  
+
   try {
     const response = await fetch(`${BASE_URL}/api/auth/login`, {
       method: 'POST',
@@ -109,38 +126,48 @@ async function login(): Promise<{ accessToken: string; userId: string }> {
 }
 
 /**
- * Get or create direct conversation with target user
+ * Get or create conversation
+ * For direct chat: get/create direct conversation with target user
+ * For group chat: use group ID to generate conversation ID
  */
-async function getOrCreateConversation(targetUserId: string): Promise<string> {
-  console.log('\n💬 Getting or creating conversation...');
+async function getConversation(): Promise<string> {
+  console.log(`\n💬 Getting conversation (type: ${CHAT_TYPE}, target: ${TARGET_ID})...`);
 
-  try {
-    const response = await fetch(`${BASE_URL}/api/chats/conversations/direct/${targetUserId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-    });
+  if (CHAT_TYPE === 'group') {
+    // For group chat, generate conversation ID from group ID
+    const groupConversationId = `group_${TARGET_ID}`;
+    console.log(`✅ Group conversation ID: ${groupConversationId}`);
+    return groupConversationId;
+  } else {
+    // For direct chat, get or create conversation via API
+    try {
+      const response = await fetch(`${BASE_URL}/api/chats/conversations/direct/${TARGET_ID}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
 
-    const data = await response.json() as any;
+      const data = await response.json() as any;
 
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to get conversation');
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get conversation');
+      }
+
+      const conversationId = data.data?.conversation?.conversationId || data.data?.conversation?.id;
+
+      if (!conversationId) {
+        throw new Error('Conversation ID not found in response');
+      }
+
+      console.log(`✅ Direct conversation ID: ${conversationId}`);
+
+      return conversationId;
+    } catch (error: any) {
+      console.error(`❌ Failed to get conversation: ${error.message}`);
+      throw error;
     }
-
-    const conversationId = data.data?.conversation?.conversationId || data.data?.conversation?.id;
-    
-    if (!conversationId) {
-      throw new Error('Conversation ID not found in response');
-    }
-
-    console.log(`✅ Conversation ID: ${conversationId}`);
-
-    return conversationId;
-  } catch (error: any) {
-    console.error(`❌ Failed to get conversation: ${error.message}`);
-    throw error;
   }
 }
 
@@ -161,7 +188,7 @@ async function sendMessageHttp(text: string): Promise<void> {
         text,
         type: 'text',
         msgId,
-        chatType: 'direct',
+        chatType: CHAT_TYPE,
       }),
     });
 
@@ -244,7 +271,7 @@ async function sendMessageWebSocket(text: string): Promise<void> {
       text,
       type: 'text',
       msgId,
-      chatType: 'direct',
+      chatType: CHAT_TYPE,
     });
 
     socket!.once('error', (error: any) => {
@@ -274,6 +301,8 @@ async function sendMessage(text: string): Promise<void> {
 async function runTest() {
   console.log('\n╔═══════════════════════════════════════════════════════════╗');
   console.log('║              Sender Test Script Started                    ║');
+  console.log(`║   Chat Type: ${CHAT_TYPE.padEnd(49)}║`);
+  console.log(`║   Target ID: ${TARGET_ID.padEnd(49)}║`);
   console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
   try {
@@ -281,7 +310,7 @@ async function runTest() {
     await login();
 
     // Step 2: Get or create conversation
-    conversationId = await getOrCreateConversation(TARGET_USER_ID);
+    conversationId = await getConversation();
 
     // Step 3: Connect to WebSocket (optional, for real-time testing)
     try {
