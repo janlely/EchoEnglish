@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  ActivityIndicator,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -162,7 +161,6 @@ const ContactsScreen = () => {
   const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>([]);
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [groups, setGroups] = useState<GroupItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
   // 折叠状态
@@ -219,34 +217,56 @@ const ContactsScreen = () => {
   const loadContacts = async () => {
     if (!db) {
       console.log('[Contacts] Database not available');
-      setLoading(false);
       return;
     }
 
     const startTime = Date.now();
     console.log('[Contacts] Start loading contacts...');
-    setLoading(true);
+
     try {
       console.log('[Contacts] Loading contacts from local database...');
 
-      // 执行增量同步（失败也不影响后续加载）
+      // 执行增量同步（后台同步，不阻塞 UI）
       const syncStart = Date.now();
       try {
-        await contactSyncService.syncContacts();
-        console.log(`[Contacts] Sync completed in ${Date.now() - syncStart}ms`);
+        contactSyncService.syncContacts().then(() => {
+          console.log(`[Contacts] Background sync completed in ${Date.now() - syncStart}ms`);
+          // 同步完成后重新加载，更新 UI
+          loadContactsFromLocal();
+        });
       } catch (syncError) {
-        console.warn('[Contacts] Sync failed, loading from local cache:', syncError);
+        console.warn('[Contacts] Sync failed, using local cache:', syncError);
       }
 
-      // 同步好友申请（失败也不影响后续加载）
+      // 同步好友申请（后台同步，不阻塞 UI）
       const requestSyncStart = Date.now();
-      try {
-        await friendRequestService.syncPendingRequests();
+      friendRequestService.syncPendingRequests().then(() => {
         console.log(`[Contacts] Friend request sync completed in ${Date.now() - requestSyncStart}ms`);
-      } catch (syncError) {
+        fetchFriendRequests();
+      }).catch((syncError: any) => {
         console.warn('[Contacts] Friend request sync failed:', syncError);
-      }
+      });
 
+      // 从本地数据库加载（立即显示）
+      loadContactsFromLocal();
+      fetchFriendRequests();
+
+      console.log(`[Contacts] Initial load completed in ${Date.now() - startTime}ms`);
+    } catch (error: any) {
+      console.error('[Contacts] Load contacts error:', error.message);
+    } finally {
+      setSyncing(false);
+      console.log(`[Contacts] Loading finished, total time: ${Date.now() - startTime}ms`);
+    }
+  };
+
+  /**
+   * 从本地数据库加载联系人
+   */
+  const loadContactsFromLocal = async () => {
+    if (!db) return;
+
+    try {
       // 从本地数据库加载好友
       const loadFriendsStart = Date.now();
       const dbFriends = await db.collections
@@ -303,21 +323,10 @@ const ContactsScreen = () => {
       );
 
       setGroups(groupsWithCount);
-
-      // 加载好友申请
-      const fetchRequestsStart = Date.now();
-      await fetchFriendRequests();
-      console.log(`[Contacts] Fetch friend requests completed in ${Date.now() - fetchRequestsStart}ms`);
-
       console.log(`[Contacts] Set state completed in ${Date.now() - setStateStart}ms`);
       console.log(`[Contacts] Loaded ${dbFriends.length} friends and ${groupsWithCount.length} groups`);
-      console.log(`[Contacts] Total loadContacts completed in ${Date.now() - startTime}ms`);
     } catch (error: any) {
-      console.error('[Contacts] Load contacts error:', error.message);
-    } finally {
-      setLoading(false);
-      setSyncing(false);
-      console.log(`[Contacts] Loading finished, total time: ${Date.now() - startTime}ms`);
+      console.error('[Contacts] Load contacts from local error:', error.message);
     }
   };
 
@@ -597,17 +606,6 @@ const ContactsScreen = () => {
     return null;
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>加载联系人...</Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       <FlatList
@@ -624,16 +622,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f8f8',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#999',
-    fontSize: 16,
   },
   listContent: {
     paddingBottom: 20,

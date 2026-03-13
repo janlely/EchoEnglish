@@ -51,7 +51,7 @@ const ChatDetailScreen = () => {
   const route = useRoute<any>();
   const parentNavigation = useNavigation();
   const tabNavigation = parentNavigation.getParent();
-  const { sendMessage, joinChat, leaveChat, onMessage, onMessageSent } = useWebSocket();
+  const { sendMessage, joinChat, leaveChat, markRead, onMessage, onMessageSent } = useWebSocket();
   const { user } = useAuth();
 
   // 获取数据库实例
@@ -279,7 +279,7 @@ const ChatDetailScreen = () => {
     };
   }, [navigation, currentChatName, tabNavigation]);
 
-  // 当屏幕获得焦点时，刷新群组名称
+  // 当屏幕获得焦点时，刷新群组名称并标记消息为已读
   useFocusEffect(
     React.useCallback(() => {
       if (chatType === 'group' && database) {
@@ -290,16 +290,16 @@ const ChatDetailScreen = () => {
               .get<Group>('groups')
               .query(Q.where('group_id', Q.eq(chatId)))
               .fetch();
-            
+
             logger.debug('ChatDetailScreen', 'Fetched groups on focus:', groupRecords.length);
-            
+
             if (groupRecords.length > 0) {
               logger.debug('ChatDetailScreen', 'Comparing names - Current:', currentChatName, 'DB:', groupRecords[0].name);
               if (groupRecords[0].name !== currentChatName) {
                 const newGroupName = groupRecords[0].name;
                 logger.info('ChatDetailScreen', 'Updating group name on focus:', newGroupName);
                 setCurrentChatName(newGroupName);
-                
+
                 // Update navigation options directly to ensure header updates
                 navigation.setOptions({
                   headerTitle: newGroupName,
@@ -313,7 +313,29 @@ const ChatDetailScreen = () => {
 
         fetchGroupName();
       }
-    }, [database, chatId, chatType, currentChatName, navigation])
+
+      // 标记消息为已读：清除本地未读计数，并通知后端
+      logger.info('ChatDetailScreen', 'Screen focused, marking messages as read');
+      markRead(conversationId);
+
+      // 清除本地 conversation 的未读计数
+      database?.write(async () => {
+        const conversations = await database.collections
+          .get<Conversation>('conversations')
+          .query(Q.where('conversation_id', Q.eq(conversationId)))
+          .fetch();
+
+        if (conversations.length > 0) {
+          await conversations[0].update((c: Conversation) => {
+            c.unreadCount = 0;
+            c.updatedAt = Date.now();
+          });
+          logger.info('ChatDetailScreen', 'Local unread count cleared');
+        }
+      }).catch(err => {
+        logger.error('ChatDetailScreen', 'Error clearing unread count:', err);
+      });
+    }, [database, chatId, chatType, currentChatName, navigation, conversationId, markRead])
   );
 
   // 处理消息长按
