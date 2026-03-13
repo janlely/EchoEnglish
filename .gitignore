@@ -152,6 +152,9 @@ dist/
 bundle/
 *.bundle
 
+# Prisma migrations (generated database migrations)
+server/prisma/migrations/
+
 # System Files
 .DS_Store
 .DS_Store?
