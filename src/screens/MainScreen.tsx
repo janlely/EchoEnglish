@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { Conversation, Friend, Group, Message, UserConversation } from '../database/models';
+import { Conversation, Friend, Group } from '../database/models';
 import { MainScreenNavigationProp } from '../types/navigation';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { getConversationsWithUnread } from '../api/conversations';
@@ -20,7 +20,6 @@ import { getAvatarUrl } from '../utils/avatar';
 import logger from '../utils/logger';
 import BubbleMenu from '../components/BubbleMenu';
 import ConversationActionMenu, { ConversationMenuAction } from '../components/ConversationActionMenu';
-import { messageService } from '../services/MessageService';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -375,37 +374,35 @@ const MainScreen = () => {
   }, [database, syncConversations, loadChatSessionsFromLocal]);
 
   // Set up database observer for real-time updates
-  // Observe messages table - when new message arrives, reload sessions
-  // Note: saveMessageAndUpdateConversation updates both messages and conversations in same transaction
+  // Observe conversations table directly - when conversation changes, reload sessions
   useEffect(() => {
     if (!database) {
       logger.warn('MainScreen', 'Database not available for observer');
       return;
     }
 
-    logger.info('MainScreen', 'Setting up messages observer...');
+    logger.info('MainScreen', 'Setting up conversations observer...');
 
     // Load initial data first
     loadChatSessionsFromLocal().then(() => {
       logger.info('MainScreen', 'Initial sessions loaded');
     });
 
-    // Observe messages table - when new message arrives, reload sessions
-    const messagesCollection = database.collections.get<Message>('messages');
-    const subscription = messagesCollection
-      .query(Q.sortBy('timestamp', Q.desc))
+    // Observe conversations table directly - this is more reliable than observing messages
+    const conversationsCollection = database.collections.get<Conversation>('conversations');
+    const subscription = conversationsCollection
+      .query(Q.sortBy('updated_at', Q.desc))
       .observe()
-      .subscribe((observedMessages) => {
-        logger.info('MainScreen', '🔔 Messages observer triggered:', observedMessages.length, 'messages');
-        // Reload sessions when messages change
-        // Since saveMessageAndUpdateConversation uses single transaction, conversations table is already updated
+      .subscribe((observedConversations) => {
+        logger.info('MainScreen', '🔔 Conversations observer triggered:', observedConversations.length, 'conversations');
+        // Reload sessions when conversations change
         loadChatSessionsFromLocal();
       });
 
-    logger.info('MainScreen', 'Messages observer created');
+    logger.info('MainScreen', 'Conversations observer created');
 
     return () => {
-      logger.info('MainScreen', 'Cleaning up messages observer');
+      logger.info('MainScreen', 'Cleaning up conversations observer');
       subscription.unsubscribe();
     };
   }, [database, loadChatSessionsFromLocal]);
