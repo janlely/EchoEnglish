@@ -103,18 +103,6 @@ class WebSocketService {
     // Broadcast user online status
     this.broadcastUserStatus(userId, true);
 
-    // Handle chat room joining
-    socket.on('join_chat', (chatSessionId: string) => {
-      socket.join(`chat:${chatSessionId}`);
-      logger.info(`User ${userId} joined chat ${chatSessionId}`);
-    });
-
-    // Handle leaving chat room
-    socket.on('leave_chat', (chatSessionId: string) => {
-      socket.leave(`chat:${chatSessionId}`);
-      logger.info(`User ${userId} left chat ${chatSessionId}`);
-    });
-
     // Handle sending message
     socket.on('send_message', async (data: { targetId: string; text: string; type?: string; msgId?: string; chatType?: 'direct' | 'group' }) => {
       logger.info(`[WebSocket] Received send_message from ${userId}:`, JSON.stringify(data));
@@ -138,12 +126,7 @@ class WebSocketService {
         logger.info(`[WebSocket] Emitting message_sent to ${userId}:`, JSON.stringify(messageSentData));
         socket.emit('message_sent', messageSentData);
 
-        // Broadcast to chat room（for users who joined the room, e.g., in ChatDetailScreen）
-        const roomName = `chat:${data.targetId}`;
-        logger.info(`[WebSocket] Broadcasting to room ${roomName}`);
-        this.io?.to(roomName).emit('receive_message', message);
-
-        // Also push to online receivers directly (for users not in the chat room, e.g., in MainScreen)
+        // Push to online receivers (using user:${userId} room)
         logger.info(`[WebSocket] start Pushing to online receivers directly`);
         await this._pushToOnlineReceivers(data.targetId, userId, message, data.chatType);
         logger.info(`[WebSocket] end Pushing to online receivers directly`);
@@ -159,15 +142,21 @@ class WebSocketService {
     });
 
     // Handle message read
-    socket.on('mark_read', async (data: { chatSessionId: string }) => {
+    socket.on('mark_read', async (data: { chatSessionId: string; conversationId?: string; chatType?: 'direct' | 'group' }) => {
       try {
         await messageService.markMessagesAsRead(data.chatSessionId, userId);
-        
-        // Notify others in the chat
-        socket.to(`chat:${data.chatSessionId}`).emit('messages_read', {
-          chatSessionId: data.chatSessionId,
+
+        // Notify others in the chat using user room
+        await this._pushToConversationParticipants(
+          data.conversationId || data.chatSessionId,
           userId,
-        });
+          'messages_read',
+          {
+            chatSessionId: data.chatSessionId,
+            userId,
+          },
+          data.chatType
+        );
 
         logger.info(`Messages marked as read via WebSocket: ${data.chatSessionId}`);
       } catch (error: any) {
@@ -176,18 +165,30 @@ class WebSocketService {
     });
 
     // Handle typing indicator
-    socket.on('typing_start', (data: { chatSessionId: string }) => {
-      socket.to(`chat:${data.chatSessionId}`).emit('user_typing', {
-        chatSessionId: data.chatSessionId,
+    socket.on('typing_start', (data: { chatSessionId: string; conversationId?: string; chatType?: 'direct' | 'group' }) => {
+      this._pushToConversationParticipants(
+        data.conversationId || data.chatSessionId,
         userId,
-      });
+        'user_typing',
+        {
+          chatSessionId: data.chatSessionId,
+          userId,
+        },
+        data.chatType
+      );
     });
 
-    socket.on('typing_stop', (data: { chatSessionId: string }) => {
-      socket.to(`chat:${data.chatSessionId}`).emit('user_stopped_typing', {
-        chatSessionId: data.chatSessionId,
+    socket.on('typing_stop', (data: { chatSessionId: string; conversationId?: string; chatType?: 'direct' | 'group' }) => {
+      this._pushToConversationParticipants(
+        data.conversationId || data.chatSessionId,
         userId,
-      });
+        'user_stopped_typing',
+        {
+          chatSessionId: data.chatSessionId,
+          userId,
+        },
+        data.chatType
+      );
     });
 
     // Handle AI assistant request
@@ -553,13 +554,6 @@ Directly output only the Chinese translation, no explanations.`;
   }
 
   /**
-   * Send message to chat room
-   */
-  sendToChat(chatSessionId: string, event: string, data: any) {
-    this.io?.to(`chat:${chatSessionId}`).emit(event, data);
-  }
-
-  /**
    * Broadcast to all connected clients
    */
   broadcast(event: string, data: any) {
@@ -578,6 +572,59 @@ Directly output only the Chinese translation, no explanations.`;
    */
   isUserOnline(userId: string): boolean {
     return this.userSockets.has(userId) && this.userSockets.get(userId)!.size > 0;
+  }
+
+  /**
+   * Get other participant IDs in a conversation
+   * Returns array of user IDs for the given conversation
+   */
+  private async _getOtherParticipantIds(
+    targetId: string,
+    senderId: string,
+    chatType?: 'direct' | 'group'
+  ): Promise<string[]> {
+    const isGroupChat = chatType === 'group' || targetId.startsWith('group_');
+
+    if (!isGroupChat) {
+      // Direct chat: extract the other user ID from conversationId
+      const parts = targetId.split('_');
+      if (parts.length === 2) {
+        const otherUserId = parts[0] === senderId ? parts[1] : parts[0];
+        return [otherUserId];
+      } else {
+        // If targetId is already a user ID
+        return [targetId];
+      }
+    } else {
+      // Group chat: get all members except sender
+      const groupId = targetId.replace('group_', '');
+      const members = await prisma.groupMember.findMany({
+        where: { groupId },
+        select: { userId: true },
+      });
+      return members
+        .map(m => m.userId)
+        .filter(userId => userId !== senderId);
+    }
+  }
+
+  /**
+   * Push event to other participants in a conversation
+   */
+  private async _pushToConversationParticipants(
+    targetId: string,
+    senderId: string,
+    event: string,
+    data: any,
+    chatType?: 'direct' | 'group'
+  ) {
+    const participantIds = await this._getOtherParticipantIds(targetId, senderId, chatType);
+
+    for (const participantId of participantIds) {
+      if (this.userSockets.has(participantId)) {
+        this.sendToUser(participantId, event, data);
+      }
+    }
   }
 }
 

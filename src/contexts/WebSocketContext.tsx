@@ -13,11 +13,9 @@ import {
 interface WebSocketContextType {
   isConnected: boolean;
   sendMessage: (conversationId: string, text: string, type?: string, msgId?: string, chatType?: 'direct' | 'group') => void;
-  joinChat: (chatId: string) => void;
-  leaveChat: (chatId: string) => void;
-  markRead: (chatId: string) => void;
-  startTyping: (chatId: string) => void;
-  stopTyping: (chatId: string) => void;
+  markRead: (chatId: string, conversationId: string, chatType: 'direct' | 'group') => void;
+  startTyping: (chatId: string, conversationId: string, chatType: 'direct' | 'group') => void;
+  stopTyping: (chatId: string, conversationId: string, chatType: 'direct' | 'group') => void;
   translateMessage: (data: { id: string; messageId: string; conversationId: string }, handler: (response: any) => void) => () => void;
   onMessage: (handler: (data: WebSocketMessageData) => void) => () => void;
   onMessageSent: (handler: (data: WebSocketMessageData) => void) => () => void;
@@ -140,20 +138,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         sendMessage: (conversationId, text, type, msgId, chatType) => {
           WebSocketService.sendMessage(conversationId, text, type, msgId, chatType);
         },
-        joinChat: (chatId) => {
-          WebSocketService.joinChat(chatId);
+        markRead: (chatId, conversationId, chatType) => {
+          WebSocketService.markRead(chatId, conversationId, chatType);
         },
-        leaveChat: (chatId) => {
-          WebSocketService.leaveChat(chatId);
+        startTyping: (chatId, conversationId, chatType) => {
+          WebSocketService.startTyping(chatId, conversationId, chatType);
         },
-        markRead: (chatId) => {
-          WebSocketService.markRead(chatId);
-        },
-        startTyping: (chatId) => {
-          WebSocketService.startTyping(chatId);
-        },
-        stopTyping: (chatId) => {
-          WebSocketService.stopTyping(chatId);
+        stopTyping: (chatId, conversationId, chatType) => {
+          WebSocketService.stopTyping(chatId, conversationId, chatType);
         },
         translateMessage: (data, handler) => {
           console.log('[WebSocketContext] translateMessage called:', data);

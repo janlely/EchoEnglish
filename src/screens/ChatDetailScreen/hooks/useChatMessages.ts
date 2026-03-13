@@ -24,8 +24,6 @@ interface UseChatMessagesParams {
   user: { id: string; avatarUrl?: string } | null;
   onMessage: (callback: (data: any) => void) => () => void;
   onMessageSent: (callback: (data: WebSocketMessageData) => void) => () => void;
-  joinChat: (conversationId: string) => void;
-  leaveChat: (conversationId: string) => void;
   syncMessagesFromServer: () => Promise<void>;
   syncConversationInfo: () => Promise<void>;
   syncUserInfo: (userId: string) => Promise<void>;
@@ -39,8 +37,6 @@ export const useChatMessages = ({
   user,
   onMessage,
   onMessageSent,
-  joinChat,
-  leaveChat,
   syncMessagesFromServer,
   syncConversationInfo,
   syncUserInfo,
@@ -237,10 +233,6 @@ export const useChatMessages = ({
     // 加载消息
     loadMessagesFromDatabase();
 
-    // 加入聊天室
-    logger.debug('useChatMessages', 'Joining chat room:', conversationId);
-    joinChat(conversationId);
-
     // 数据库订阅
     const subscription = database.collections
       .get<Message>('messages')
@@ -343,7 +335,6 @@ export const useChatMessages = ({
       subscription.unsubscribe();
       unsubscribeMessage();
       unsubscribeMessageSent();
-      leaveChat(conversationId);
 
       // 清除所有超时定时器
       sendingTimeouts.current.forEach((timeout) => clearTimeout(timeout));
@@ -357,8 +348,6 @@ export const useChatMessages = ({
     user,
     onMessage,
     onMessageSent,
-    joinChat,
-    leaveChat,
     syncMessagesFromServer,
     syncConversationInfo,
     syncUserInfo,

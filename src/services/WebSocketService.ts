@@ -219,24 +219,16 @@ class WebSocketServiceClass {
     }
   }
 
-  joinChat(chatId: string) {
-    this.socket?.emit('join_chat', chatId);
+  markRead(chatId: string, conversationId: string, chatType: 'direct' | 'group') {
+    this.socket?.emit('mark_read', { chatSessionId: chatId, conversationId, chatType });
   }
 
-  leaveChat(chatId: string) {
-    this.socket?.emit('leave_chat', chatId);
+  startTyping(chatId: string, conversationId: string, chatType: 'direct' | 'group') {
+    this.socket?.emit('typing_start', { chatSessionId: chatId, conversationId, chatType });
   }
 
-  markRead(chatId: string) {
-    this.socket?.emit('mark_read', { chatSessionId: chatId });
-  }
-
-  startTyping(chatId: string) {
-    this.socket?.emit('typing_start', { chatSessionId: chatId });
-  }
-
-  stopTyping(chatId: string) {
-    this.socket?.emit('typing_stop', { chatSessionId: chatId });
+  stopTyping(chatId: string, conversationId: string, chatType: 'direct' | 'group') {
+    this.socket?.emit('typing_stop', { chatSessionId: chatId, conversationId, chatType });
   }
 
   sendAssistantRequest(id: string, input: string, conversationId: string) {

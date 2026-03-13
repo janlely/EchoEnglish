@@ -51,7 +51,7 @@ const ChatDetailScreen = () => {
   const route = useRoute<any>();
   const parentNavigation = useNavigation();
   const tabNavigation = parentNavigation.getParent();
-  const { sendMessage, joinChat, leaveChat, markRead, onMessage, onMessageSent } = useWebSocket();
+  const { sendMessage, markRead, onMessage, onMessageSent } = useWebSocket();
   const { user } = useAuth();
 
   // 获取数据库实例
@@ -100,8 +100,6 @@ const ChatDetailScreen = () => {
     user,
     onMessage,
     onMessageSent,
-    joinChat,
-    leaveChat,
     syncMessagesFromServer,
     syncConversationInfo,
     syncUserInfo,
@@ -316,7 +314,7 @@ const ChatDetailScreen = () => {
 
       // 标记消息为已读：清除本地未读计数，并通知后端
       logger.info('ChatDetailScreen', 'Screen focused, marking messages as read');
-      markRead(conversationId);
+      markRead(conversationId, conversationId, chatType);
 
       // 清除本地 conversation 的未读计数
       database?.write(async () => {
