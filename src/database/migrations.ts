@@ -4,6 +4,29 @@ import { schemaMigrations } from '@nozbe/watermelondb/Schema/migrations';
 // When incrementing schema version in schema.ts, add migration here
 export const migrations = schemaMigrations({
   migrations: [
+    // Migration from schema version 10 to 11
+    // Added seq field to messages table for message ordering
+    // Added latest_seq and last_read_seq to conversations table
+    {
+      toVersion: 11,
+      steps: [
+        {
+          type: 'add_columns',
+          table: 'messages',
+          columns: [
+            { name: 'seq', type: 'number' },
+          ],
+        },
+        {
+          type: 'add_columns',
+          table: 'conversations',
+          columns: [
+            { name: 'latest_seq', type: 'number', isOptional: true },
+            { name: 'last_read_seq', type: 'number', isOptional: true },
+          ],
+        },
+      ],
+    },
     // Migration from schema version 9 to 10
     // Adds is_pinned column to conversations table for pinning conversations
     {

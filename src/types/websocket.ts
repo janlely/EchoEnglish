@@ -4,6 +4,7 @@
 export interface WebSocketMessageData {
   id?: string;
   msgId?: string;
+  seq?: number;  // Server-generated sequence number
   text: string;
   type?: 'text' | 'image' | 'file';
   status?: 'sending' | 'sent' | 'delivered' | 'read';

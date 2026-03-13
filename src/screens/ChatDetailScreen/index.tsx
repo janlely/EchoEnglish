@@ -138,6 +138,21 @@ const ChatDetailScreen = () => {
     transform: [{ translateY: translateY.value }],
   }));
 
+  // 设置当前聊天 ID（用于消息服务判断是否需要增加未读数）
+  useEffect(() => {
+    // 进入聊天页面时，调用同步接口获取未读消息并确认
+    const syncAndAck = async () => {
+      logger.info('ChatDetailScreen', 'Entering chat, syncing messages...');
+      await syncMessagesFromServer();
+    };
+    
+    syncAndAck();
+
+    return () => {
+      logger.info('ChatDetailScreen', 'Leaving chat');
+    };
+  }, [chatId, conversationId]);
+
   // 订阅群组名称变更
   useEffect(() => {
     if (!database || chatType !== 'group') return;

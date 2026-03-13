@@ -3,6 +3,7 @@ import { WebSocketService } from '../services/WebSocketService';
 import { useAuth } from './AuthContext';
 import { ApiService } from '../services/ApiService';
 import { authEventEmitter } from '../services/WebSocketService';
+import logger from '../utils/logger';
 import {
   WebSocketMessageData,
   WebSocketUserStatusData,
@@ -69,7 +70,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     if (!isAuthenticated) {
       // 未登录时断开连接
-      console.log('🔌 Disconnecting WebSocket (not authenticated)');
+      logger.info('WebSocketContext', '🔌 Disconnecting WebSocket (not authenticated)');
       WebSocketService.disconnect();
       setIsConnected(false);
       if (reconnectTimeoutRef.current) {
@@ -80,27 +81,57 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     // 已登录时连接 WebSocket
-    console.log('🔌 Connecting WebSocket (authenticated)');
+    logger.info('WebSocketContext', '🔌 Connecting WebSocket (authenticated)');
     connectWebSocket();
 
     // 定期检查连接状态
     const checkInterval = setInterval(() => {
       if (!WebSocketService.isConnected()) {
-        console.warn('⚠️ WebSocket disconnected, attempting to reconnect...');
+        logger.warn('WebSocketContext', '⚠️ WebSocket disconnected, attempting to reconnect...');
         connectWebSocket();
       }
     }, 10000); // 每 10 秒检查一次
 
     return () => {
-      console.log('🔌 Cleaning up WebSocket connection');
-      WebSocketService.disconnect();
-      setIsConnected(false);
+      // 只在组件卸载时断开连接（比如用户退出登录）
+      logger.info('WebSocketContext', '🔌 WebSocketProvider unmounting, cleaning up...');
+      if (!isAuthenticated) {
+        WebSocketService.disconnect();
+        setIsConnected(false);
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
       clearInterval(checkInterval);
     };
   }, [isAuthenticated, connectWebSocket]);
+
+  // 使用 useCallback 确保 onMessage 引用稳定
+  const onMessage = React.useCallback((handler: (data: WebSocketMessageData) => void) => {
+    logger.info('WebSocketContext', '📝 onMessage called, registering listener for receive_message');
+    logger.info('WebSocketContext', 'Handler type:', typeof handler);
+    const result = WebSocketService.on('receive_message', handler as (data: unknown) => void);
+    logger.info('WebSocketContext', 'Listener registered, result:', result);
+    return () => {
+      logger.info('WebSocketContext', '🗑️ onMessage cleanup, removing listener for receive_message');
+      WebSocketService.off('receive_message', handler as (data: unknown) => void);
+    };
+  }, []);
+
+  const onMessageSent = React.useCallback((handler: (data: WebSocketMessageData) => void) => {
+    WebSocketService.on('message_sent', handler as (data: unknown) => void);
+    return () => WebSocketService.off('message_sent', handler as (data: unknown) => void);
+  }, []);
+
+  const onUserStatus = React.useCallback((handler: (data: WebSocketUserStatusData) => void) => {
+    WebSocketService.on('user_status_changed', handler as (data: unknown) => void);
+    return () => WebSocketService.off('user_status_changed', handler as (data: unknown) => void);
+  }, []);
+
+  const onTyping = React.useCallback((handler: (data: WebSocketTypingData) => void) => {
+    WebSocketService.on('user_typing', handler as (data: unknown) => void);
+    return () => WebSocketService.off('user_typing', handler as (data: unknown) => void);
+  }, []);
 
   return (
     <WebSocketContext.Provider
@@ -126,38 +157,26 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         },
         translateMessage: (data, handler) => {
           console.log('[WebSocketContext] translateMessage called:', data);
-          
+
           // 先注册监听器，再发送事件
           WebSocketService.on('translate_message_response', handler as (data: unknown) => void);
           console.log('[WebSocketContext] translate_message_response listener registered');
-          
+
           // 稍后发送事件，确保监听器已注册
           setTimeout(() => {
             WebSocketService.emit('translate_message', data);
             console.log('[WebSocketContext] translate_message event emitted');
           }, 50);
-          
+
           return () => {
             console.log('[WebSocketContext] Cleaning up translate_message listener');
             WebSocketService.off('translate_message_response', handler as (data: unknown) => void);
           };
         },
-        onMessage: (handler: (data: WebSocketMessageData) => void) => {
-          WebSocketService.on('receive_message', handler as (data: unknown) => void);
-          return () => WebSocketService.off('receive_message', handler as (data: unknown) => void);
-        },
-        onMessageSent: (handler: (data: WebSocketMessageData) => void) => {
-          WebSocketService.on('message_sent', handler as (data: unknown) => void);
-          return () => WebSocketService.off('message_sent', handler as (data: unknown) => void);
-        },
-        onUserStatus: (handler: (data: WebSocketUserStatusData) => void) => {
-          WebSocketService.on('user_status_changed', handler as (data: unknown) => void);
-          return () => WebSocketService.off('user_status_changed', handler as (data: unknown) => void);
-        },
-        onTyping: (handler: (data: WebSocketTypingData) => void) => {
-          WebSocketService.on('user_typing', handler as (data: unknown) => void);
-          return () => WebSocketService.off('user_typing', handler as (data: unknown) => void);
-        },
+        onMessage,
+        onMessageSent,
+        onUserStatus,
+        onTyping,
       }}
     >
       {children}

@@ -4,11 +4,14 @@ import { View, Text, StyleSheet } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { useWebSocket } from '../contexts/WebSocketContext';
+import { useNavigationState } from '@react-navigation/native';
 import MainScreen from '../screens/MainScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import ContactsScreen from '../screens/ContactsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import { friendRequestService } from '../services/FriendRequestService';
+import { messageService } from '../services/MessageService';
+import logger from '../utils/logger';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -47,32 +50,87 @@ const MainTabNavigator = () => {
   const db = useDatabase();
   const { onMessage } = useWebSocket();
   const [unreadFriendRequests, setUnreadFriendRequests] = useState(0);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
 
-  // 初始化好友申请服务并监听未读数
+  logger.info('MainTabNavigator', 'Component rendered, db:', !!db, 'onMessage:', typeof onMessage);
+
+  // 获取当前路由名称，判断是否在 Chats 页面
+  const currentRouteName = useNavigationState((state) => {
+    if (!state) return '';
+    const currentRoute = state.routes[state.index];
+    // 如果是 Chats tab，检查子路由
+    if (currentRoute.name === 'Chats' && currentRoute.state) {
+      const routeIndex = currentRoute.state.index;
+      if (routeIndex !== undefined && currentRoute.state.routes[routeIndex]) {
+        return currentRoute.state.routes[routeIndex].name;
+      }
+    }
+    return currentRoute.name;
+  });
+
+  const isOnChatsTab = currentRouteName === 'MainChat' || currentRouteName === 'ChatDetail';
+
+  // 初始化消息服务和好友申请服务
   useEffect(() => {
     if (!db) {
+      logger.warn('MainTabNavigator', 'Database not ready, skipping initialization');
       return;
     }
 
-    // 设置数据库
+    logger.info('MainTabNavigator', 'Initializing message services...');
+    logger.info('MainTabNavigator', 'onMessage function exists:', typeof onMessage === 'function');
+
+    // 设置数据库实例
+    messageService.setDatabase(db);
     friendRequestService.setDatabase(db);
+
+    logger.info('MainTabNavigator', 'Database set for messageService and friendRequestService');
 
     // 获取初始未读数（延迟执行确保数据库已准备好）
     setTimeout(() => {
       friendRequestService.getUnreadCount().then(setUnreadFriendRequests);
     }, 200);
 
-    // 添加未读数监听器
-    const unsubscribeCount = friendRequestService.addUnreadCountListener(setUnreadFriendRequests);
+    // 添加好友申请未读数监听器
+    const unsubscribeFriendRequestCount = friendRequestService.addUnreadCountListener(setUnreadFriendRequests);
 
-    // 启动 WebSocket 监听
+    // 监听新消息，只在不在 Chats 页面时设置角标
+    const unsubscribeMessage = messageService.addMessageListener((data) => {
+      logger.info('MainTabNavigator', '🔔 New message received:', JSON.stringify(data));
+      // 如果当前不在 Chats 页面，显示角标
+      if (!isOnChatsTab) {
+        setHasUnreadMessages(true);
+        logger.info('MainTabNavigator', 'Not on Chats tab, showing badge');
+      }
+    });
+
+    // 启动全局消息监听（处理所有聊天消息）
+    // 注意：messageService.startListener 有防重复逻辑，只会注册一次
+    logger.info('MainTabNavigator', 'Calling messageService.startListener...');
+    messageService.startListener(onMessage);
+
+    // 启动 WebSocket 监听（处理好友申请）
+    logger.info('MainTabNavigator', 'Calling friendRequestService.startWebSocketListener...');
     friendRequestService.startWebSocketListener(onMessage);
 
+    logger.info('MainTabNavigator', 'Message services initialized');
+
     return () => {
-      unsubscribeCount();
+      logger.info('MainTabNavigator', 'Cleaning up message services...');
+      unsubscribeFriendRequestCount();
+      unsubscribeMessage();
       friendRequestService.stopWebSocketListener();
+      messageService.stopListener();
     };
   }, [db, onMessage]);
+
+  // 当切换到 Chats 页面时，清除角标
+  useEffect(() => {
+    if (isOnChatsTab && hasUnreadMessages) {
+      console.log('[MainTabNavigator] Switched to Chats tab, hiding badge');
+      setHasUnreadMessages(false);
+    }
+  }, [isOnChatsTab, hasUnreadMessages]);
 
   return (
     <Tab.Navigator
@@ -100,7 +158,10 @@ const MainTabNavigator = () => {
       <Tab.Screen
         name="Chats"
         component={ChatStack}
-        options={{ title: '消息' }}
+        options={{
+          title: '消息',
+          tabBarBadge: hasUnreadMessages ? 1 : undefined,
+        }}
       />
       <Tab.Screen
         name="Contacts"

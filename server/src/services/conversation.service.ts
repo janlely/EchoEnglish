@@ -13,12 +13,12 @@ interface ConversationInfo {
   targetId: string;
   name: string;
   avatarUrl?: string | null;
-  latestMsgId?: string | null;
+  latestSeq?: number | null;
   latestSummary?: string | null;
   latestSenderId?: string | null;
   latestTimestamp?: Date | null;
   unreadCount: number;
-  lastReadMsgId?: string | null;
+  lastReadSeq?: number | null;
 }
 
 class ConversationService {
@@ -125,7 +125,7 @@ class ConversationService {
           type: 'group',
           targetId: groupId,
           unreadCount: 0,
-          lastReadMsgId: null, // Initialize as null, will be updated when user reads messages
+          lastReadSeq: null, // Initialize as null, will be updated when user reads messages
         },
       });
 
@@ -178,11 +178,11 @@ class ConversationService {
         // 获取或创建 UserConversationState
         const state = await this.getOrCreateGroupConversationState(userId, groupId);
 
-        // Get the latest message ID from Conversation record (not from UserConversationState)
+        // Get the latest message seq from Conversation record
         const conversation = await prisma.conversation.findUnique({
           where: { id: conversationId },
           select: {
-            latestMsgId: true,
+            latestSeq: true,
             latestSummary: true,
             latestSenderId: true,
             latestTimestamp: true,
@@ -195,12 +195,12 @@ class ConversationService {
           targetId: groupId,
           name: group.name,
           avatarUrl: group.avatarUrl,
-          latestMsgId: conversation?.latestMsgId || undefined,
+          latestSeq: conversation?.latestSeq || undefined,
           latestSummary: conversation?.latestSummary || undefined,
           latestSenderId: conversation?.latestSenderId || undefined,
           latestTimestamp: conversation?.latestTimestamp || undefined,
           unreadCount: state.state.unreadCount,
-          lastReadMsgId: state.state.lastReadMsgId,
+          lastReadSeq: state.state.lastReadSeq,
         };
       } else {
         // 单聊：获取对方用户信息
@@ -225,18 +225,29 @@ class ConversationService {
         // 获取或创建 UserConversationState
         const state = await this.getOrCreateDirectConversationState(userId, otherUserId);
 
+        // 获取 Conversation 记录获取最新消息信息
+        const conversation = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+          select: {
+            latestSeq: true,
+            latestSummary: true,
+            latestSenderId: true,
+            latestTimestamp: true,
+          },
+        });
+
         return {
           conversationId,
           type: 'direct',
           targetId: otherUserId,
           name: otherUser.name,
           avatarUrl: otherUser.avatarUrl,
-          latestMsgId: state.state.lastReadMsgId || undefined,
-          latestSummary: undefined,
-          latestSenderId: undefined,
-          latestTimestamp: undefined,
+          latestSeq: conversation?.latestSeq || undefined,
+          latestSummary: conversation?.latestSummary || undefined,
+          latestSenderId: conversation?.latestSenderId || undefined,
+          latestTimestamp: conversation?.latestTimestamp || undefined,
           unreadCount: state.state.unreadCount,
-          lastReadMsgId: state.state.lastReadMsgId,
+          lastReadSeq: state.state.lastReadSeq,
         };
       }
     } catch (error: any) {
@@ -284,7 +295,7 @@ class ConversationService {
               prisma.conversation.findUnique({
                 where: { id: state.conversationId },
                 select: {
-                  latestMsgId: true,
+                  latestSeq: true,
                   latestSummary: true,
                   latestSenderId: true,
                   latestTimestamp: true,
@@ -300,18 +311,18 @@ class ConversationService {
                 name: group.name,
                 avatarUrl: group.avatarUrl,
                 unreadCount: state.unreadCount,
-                lastReadMsgId: state.lastReadMsgId,
-                latestMsgId: conversation?.latestMsgId || undefined,
+                lastReadSeq: state.lastReadSeq,
+                latestSeq: conversation?.latestSeq || undefined,
                 latestSummary: conversation?.latestSummary || undefined,
                 latestSenderId: conversation?.latestSenderId || undefined,
                 latestTimestamp: conversation?.latestTimestamp || undefined,
               });
             }
           } else {
-            // 单聊：获取对方用户信息和最新消息
+            // 单聊：获取对方用户信息和 Conversation 记录
             const otherUserId = getOtherUserIdFromConversationId(state.conversationId, userId);
             if (otherUserId) {
-              const [otherUser, latestMessage] = await Promise.all([
+              const [otherUser, conversation] = await Promise.all([
                 prisma.user.findUnique({
                   where: { id: otherUserId },
                   select: {
@@ -320,14 +331,13 @@ class ConversationService {
                     avatarUrl: true,
                   },
                 }),
-                prisma.message.findFirst({
-                  where: { conversationId: state.conversationId },
-                  orderBy: { createdAt: 'desc' },
+                prisma.conversation.findUnique({
+                  where: { id: state.conversationId },
                   select: {
-                    msgId: true,
-                    text: true,
-                    senderId: true,
-                    createdAt: true,
+                    latestSeq: true,
+                    latestSummary: true,
+                    latestSenderId: true,
+                    latestTimestamp: true,
                   },
                 }),
               ]);
@@ -340,11 +350,11 @@ class ConversationService {
                   name: otherUser.name,
                   avatarUrl: otherUser.avatarUrl,
                   unreadCount: state.unreadCount,
-                  lastReadMsgId: state.lastReadMsgId,
-                  latestMsgId: latestMessage?.msgId || undefined,
-                  latestSummary: latestMessage?.text || undefined,
-                  latestSenderId: latestMessage?.senderId || undefined,
-                  latestTimestamp: latestMessage?.createdAt || undefined,
+                  lastReadSeq: state.lastReadSeq,
+                  latestSeq: conversation?.latestSeq || undefined,
+                  latestSummary: conversation?.latestSummary || undefined,
+                  latestSenderId: conversation?.latestSenderId || undefined,
+                  latestTimestamp: conversation?.latestTimestamp || undefined,
                 });
               }
             }
@@ -366,7 +376,7 @@ class ConversationService {
    */
   async updateConversationState(
     conversationId: string,
-    msgId: string,
+    seq: number,
     summary: string,
     senderId: string,
     timestamp: Date
@@ -374,26 +384,24 @@ class ConversationService {
     try {
       const isGroup = isGroupConversation(conversationId);
 
-      // 只更新群聊的 Conversation 记录
-      if (isGroup) {
-        await prisma.conversation.upsert({
-          where: { id: conversationId },
-          update: {
-            latestMsgId: msgId,
-            latestSummary: summary,
-            latestSenderId: senderId,
-            latestTimestamp: timestamp,
-          },
-          create: {
-            id: conversationId,
-            groupId: conversationId.replace('group_', ''),
-            latestMsgId: msgId,
-            latestSummary: summary,
-            latestSenderId: senderId,
-            latestTimestamp: timestamp,
-          },
-        });
-      }
+      // 更新 Conversation 记录（单聊和群聊都更新）
+      await prisma.conversation.upsert({
+        where: { id: conversationId },
+        update: {
+          latestSeq: seq,
+          latestSummary: summary,
+          latestSenderId: senderId,
+          latestTimestamp: timestamp,
+        },
+        create: {
+          id: conversationId,
+          groupId: isGroup ? conversationId.replace('group_', '') : '',
+          latestSeq: seq,
+          latestSummary: summary,
+          latestSenderId: senderId,
+          latestTimestamp: timestamp,
+        },
+      });
 
       logger.info(`[ConversationService] Updated conversation state: ${conversationId}`);
     } catch (error: any) {
@@ -408,7 +416,7 @@ class ConversationService {
   async updateUserReadStatus(
     userId: string,
     conversationId: string,
-    lastReadMsgId: string
+    lastReadSeq: number
   ) {
     try {
       await prisma.userConversationState.upsert({
@@ -419,7 +427,7 @@ class ConversationService {
           },
         },
         update: {
-          lastReadMsgId,
+          lastReadSeq,
           unreadCount: 0,
         },
         create: {
@@ -429,7 +437,7 @@ class ConversationService {
           targetId: isGroupConversation(conversationId)
             ? conversationId.replace('group_', '')
             : getOtherUserIdFromConversationId(conversationId, userId) || '',
-          lastReadMsgId,
+          lastReadSeq,
           unreadCount: 0,
         },
       });

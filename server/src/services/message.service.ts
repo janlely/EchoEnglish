@@ -3,6 +3,7 @@ import prisma from '../config/database';
 import logger from '../utils/logger';
 import { PaginationParams } from '../types';
 import conversationService from './conversation.service';
+import redisService from './redis.service';
 import {
   generateDirectConversationId,
   generateGroupConversationId,
@@ -95,11 +96,26 @@ class MessageService {
         logger.info(`[MessageService] Direct chat permission check passed`);
       }
 
+      // Get next sequence number
+      let seq = await redisService.getNextSeq(conversationId);
+      
+      // Fallback to database if Redis is unavailable
+      if (!seq) {
+        logger.warn('[MessageService] Redis unavailable, falling back to DB for seq');
+        const lastMessage = await prisma.message.findFirst({
+          where: { conversationId },
+          orderBy: { seq: 'desc' },
+          select: { seq: true },
+        });
+        seq = (lastMessage?.seq || 0) + 1;
+      }
+
       // Create message
       const message = await prisma.message.create({
         data: {
           id: uuidv4(),
           msgId: msgId || uuidv4(),
+          seq,
           conversationId,
           text,
           type,
@@ -117,7 +133,7 @@ class MessageService {
         },
       });
 
-      logger.info(`[MessageService] Message created: ${message.id}`);
+      logger.info(`[MessageService] Message created: ${message.id}, seq: ${seq}`);
 
       // Get sender info from the included relation
       const senderInfo = {
@@ -129,7 +145,7 @@ class MessageService {
       // Update conversation state (only for group chat)
       await conversationService.updateConversationState(
         conversationId,
-        msgId || message.msgId,
+        message.seq,
         text,
         senderId,
         message.createdAt
@@ -162,11 +178,13 @@ class MessageService {
       return {
         id: message.id,
         msgId: message.msgId,
+        seq: message.seq,
         text: message.text,
         type: message.type,
         status: message.status,
         senderId: message.senderId,
         conversationId: message.conversationId,
+        chatType,
         sender: senderInfo,
         createdAt: message.createdAt,
       };
@@ -248,6 +266,7 @@ class MessageService {
         data: messages.map((msg) => ({
           id: msg.id,
           msgId: msg.msgId,
+          seq: msg.seq,
           text: msg.text,
           type: msg.type,
           status: msg.status,
@@ -348,7 +367,7 @@ class MessageService {
       }
 
       // Update user's read status using UserConversationState
-      await conversationService.updateUserReadStatus(userId, conversationId, latestMessage.msgId);
+      await conversationService.updateUserReadStatus(userId, conversationId, latestMessage.seq);
 
       // Mark messages as read
       const result = await prisma.message.updateMany({
@@ -521,21 +540,21 @@ class MessageService {
   }
 
   /**
-   * Mark messages as read by msgId (all messages with msgId <= given msgId)
+   * Mark messages as read by seq (all messages with seq <= given seq)
    */
-  async markMessagesAsReadByMsgId(
+  async markMessagesAsReadBySeq(
     userId: string,
     conversationId: string,
-    msgId: string
+    seq: number
   ) {
     try {
       // Update user's read status
-      await conversationService.updateUserReadStatus(userId, conversationId, msgId);
+      await conversationService.updateUserReadStatus(userId, conversationId, seq);
 
       const result = await prisma.message.updateMany({
         where: {
           conversationId,
-          msgId: { lte: msgId },
+          seq: { lte: seq },
           senderId: { not: userId }, // Only mark messages from others
           status: { not: 'read' },
         },
@@ -544,7 +563,7 @@ class MessageService {
         },
       });
 
-      logger.info(`Marked ${result.count} messages as read for user ${userId}, conversation ${conversationId}, up to msgId ${msgId}`);
+      logger.info(`Marked ${result.count} messages as read for user ${userId}, conversation ${conversationId}, up to seq ${seq}`);
 
       return { success: true, count: result.count };
     } catch (error: any) {
@@ -580,14 +599,14 @@ class MessageService {
 
   /**
    * Sync messages for a conversation
-   * Returns messages after lastReadMsgId (or afterMsgId), ordered from old to new
-   * Supports batch loading with afterMsgId and limit parameters
+   * Returns messages after afterSeq, ordered from old to new
+   * Supports batch loading with afterSeq and limit parameters
    */
   async syncMessages(
     currentUserId: string,
     conversationId: string,
     chatType: string,
-    afterMsgId?: string,  // Optional: start from this msgId (for batch loading)
+    afterSeq?: number,  // Optional: start from this seq (for batch loading)
     limit: number = 50
   ) {
     try {
@@ -621,10 +640,10 @@ class MessageService {
         }
       }
 
-      // Determine the starting msgId
-      // If afterMsgId is provided, use it; otherwise get from UserConversationState
-      let startMsgId = afterMsgId;
-      if (!startMsgId) {
+      // Determine the starting seq
+      // If afterSeq is provided, use it; otherwise get from UserConversationState
+      let startSeq = afterSeq;
+      if (!startSeq) {
         const state = await prisma.userConversationState.findUnique({
           where: {
             userId_conversationId: {
@@ -633,19 +652,19 @@ class MessageService {
             },
           },
         });
-        startMsgId = state?.lastReadMsgId || undefined;
+        startSeq = state?.lastReadSeq || undefined;
       }
 
-      logger.info(`[MessageService] Sync query: conversationId=${conversationId}, startMsgId=${startMsgId || 'null'}, limit=${limit}`);
+      logger.info(`[MessageService] Sync query: conversationId=${conversationId}, startSeq=${startSeq || 'null'}, limit=${limit}`);
 
-      // Build query: get messages after startMsgId
+      // Build query: get messages after startSeq
       const where: any = {
         conversationId,
       };
 
-      // Only add msgId filter if startMsgId exists
-      if (startMsgId) {
-        where.msgId = { gt: startMsgId };
+      // Only add seq filter if startSeq exists
+      if (startSeq) {
+        where.seq = { gt: startSeq };
       }
 
       // Exclude messages sent by current user
@@ -664,7 +683,7 @@ class MessageService {
             },
           },
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { seq: 'asc' },
         take: limit,
       });
 
@@ -673,6 +692,7 @@ class MessageService {
       const formattedMessages = messages.map(msg => ({
         id: msg.id,
         msgId: msg.msgId,
+        seq: msg.seq,
         text: msg.text,
         type: msg.type,
         status: msg.status,
@@ -688,12 +708,12 @@ class MessageService {
 
       // Determine if there are more messages
       const hasMore = messages.length >= limit;
-      const latestMsgId = messages.length > 0 ? messages[messages.length - 1].msgId : undefined;
+      const latestSeq = messages.length > 0 ? messages[messages.length - 1].seq : 0;
 
       return {
         messages: formattedMessages,
         hasMore,
-        latestMsgId,
+        latestSeq,
       };
     } catch (error: any) {
       logger.error('Sync messages error:', error);
@@ -702,31 +722,87 @@ class MessageService {
   }
 
   /**
-   * Acknowledge messages and update lastReadMsgId
-   * Updates lastReadMsgId and resets unread count to 0
+   * Acknowledge messages and update lastReadSeq
+   * Updates lastReadSeq and resets unread count to 0
    */
-  async ackMessages(currentUserId: string, conversationId: string, minMsgId: string) {
+  async ackMessages(currentUserId: string, conversationId: string, minSeq: number) {
     try {
-      logger.info(`[MessageService] Ack params: currentUserId=${currentUserId}, conversationId=${conversationId}, minMsgId=${minMsgId}`);
+      logger.info(`[MessageService] Ack params: currentUserId=${currentUserId}, conversationId=${conversationId}, minSeq=${minSeq}`);
 
-      // Update lastReadMsgId and reset unread count
+      // Update lastReadSeq and reset unread count
       await prisma.userConversationState.updateMany({
         where: {
           userId: currentUserId,
           conversationId: conversationId,
         },
         data: {
-          lastReadMsgId: minMsgId,
+          lastReadSeq: minSeq,
           unreadCount: 0,
           updatedAt: new Date(),
         },
       });
 
-      logger.info(`[MessageService] Updated lastReadMsgId to ${minMsgId} for user ${currentUserId}, conversation ${conversationId}`);
+      logger.info(`[MessageService] Updated lastReadSeq to ${minSeq} for user ${currentUserId}, conversation ${conversationId}`);
 
       return { success: true };
     } catch (error: any) {
       logger.error('Ack messages error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Sync messages with seq gap
+   * Returns messages between fromSeq and toSeq (exclusive)
+   */
+  async syncSeqGap(
+    conversationId: string,
+    fromSeq: number,
+    toSeq: number
+  ) {
+    try {
+      logger.info(`[MessageService] Sync seq gap: conversationId=${conversationId}, fromSeq=${fromSeq}, toSeq=${toSeq}`);
+
+      const messages = await prisma.message.findMany({
+        where: {
+          conversationId,
+          seq: {
+            gt: fromSeq,
+            lt: toSeq,
+          },
+        },
+        orderBy: { seq: 'asc' },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+        },
+      });
+
+      logger.info(`[MessageService] Synced ${messages.length} messages for seq gap`);
+
+      return messages.map(msg => ({
+        id: msg.id,
+        msgId: msg.msgId,
+        seq: msg.seq,
+        text: msg.text,
+        type: msg.type,
+        status: msg.status,
+        senderId: msg.senderId,
+        conversationId: msg.conversationId,
+        sender: msg.sender ? {
+          id: msg.sender.id,
+          name: msg.sender.name,
+          avatarUrl: msg.sender.avatarUrl,
+        } : null,
+        createdAt: msg.createdAt,
+      }));
+    } catch (error: any) {
+      logger.error('Sync seq gap error:', error);
       throw error;
     }
   }

@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { Conversation, Friend, Group, Message } from '../database/models';
+import { Conversation, Friend, Group, Message, UserConversation } from '../database/models';
 import { MainScreenNavigationProp } from '../types/navigation';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { getConversationsWithUnread } from '../api/conversations';
@@ -20,6 +20,7 @@ import { getAvatarUrl } from '../utils/avatar';
 import logger from '../utils/logger';
 import BubbleMenu from '../components/BubbleMenu';
 import ConversationActionMenu, { ConversationMenuAction } from '../components/ConversationActionMenu';
+import { messageService } from '../services/MessageService';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -31,7 +32,6 @@ interface ChatSessionInterface {
   latestMessage?: string;
   timestamp?: string;
   unreadCount: number;
-  latestMsgId?: string;
   isPinned?: boolean;
 }
 
@@ -113,14 +113,14 @@ const MainScreen = () => {
    */
   const syncConversations = React.useCallback(async () => {
     try {
-      console.log('[MainScreen] Syncing conversations with unread from server...');
+      logger.info('MainScreen', 'Syncing conversations with unread from server...');
 
       // Get conversations with unread messages
       const conversations = await getConversationsWithUnread();
-      console.log('[MainScreen] Synced', conversations.length, 'conversations with unread');
+      logger.info('MainScreen', 'Synced', conversations.length, 'conversations with unread');
 
       if (!database) {
-        console.log('[MainScreen] Database not available, skipping local update');
+        logger.warn('MainScreen', 'Database not available, skipping local update');
         setLoading(false);
         return;
       }
@@ -129,6 +129,42 @@ const MainScreen = () => {
       await database.write(async () => {
         for (const conv of conversations) {
           try {
+            // Skip if conv is undefined or missing required fields
+            if (!conv || !conv.conversationId) {
+              logger.warn('MainScreen', 'Invalid conversation data:', conv);
+              continue;
+            }
+
+            // 单聊时，如果本地没有好友信息，同步对方用户信息
+            if (conv.type === 'direct' && conv.targetId) {
+              const friends = await database.collections
+                .get<Friend>('friends')
+                .query(Q.where('friend_id', Q.eq(conv.targetId)))
+                .fetch();
+
+              if (friends.length === 0) {
+                // 没有好友信息，调用 API 获取
+                try {
+                  const { getUserInfo } = await import('../api/user');
+                  const userInfo = await getUserInfo(conv.targetId);
+
+                  await database.collections.get<Friend>('friends').create((f: Friend) => {
+                    f.friendId = userInfo.id || conv.targetId;
+                    f.name = userInfo.name || 'Unknown';
+                    f.avatarUrl = userInfo.avatarUrl || undefined;
+                    f.email = userInfo.email || undefined;
+                    f.isOnline = userInfo.isOnline || false;
+                    f.createdAt = Date.now();
+                    f.updatedAt = Date.now();
+                  });
+
+                  logger.info('MainScreen', 'Synced friend info:', conv.targetId);
+                } catch (e) {
+                  logger.warn('MainScreen', 'Failed to sync friend info:', conv.targetId, e);
+                }
+              }
+            }
+
             // Update or create conversation
             const existingConversations = await database.collections
               .get<Conversation>('conversations')
@@ -137,19 +173,27 @@ const MainScreen = () => {
 
             if (existingConversations.length > 0) {
               await existingConversations[0].update((c: Conversation) => {
-                c.type = conv.type;
-                c.targetId = conv.targetId;
-                c.unreadCount = conv.unreadCount;
-                c.latestMsgId = conv.lastReadMsgId || undefined;
+                c.type = conv.type || 'direct';
+                c.targetId = conv.targetId || '';
+                c.unreadCount = conv.unreadCount || 0;
+                c.latestSeq = conv.latestSeq || undefined;
+                c.latestSummary = conv.latestSummary || undefined;
+                c.latestSenderId = conv.latestSenderId || undefined;
+                c.latestTimestamp = conv.latestTimestamp ? new Date(conv.latestTimestamp).getTime() : undefined;
+                c.lastReadSeq = conv.lastReadSeq || undefined;
                 c.updatedAt = Date.now();
               });
             } else {
               await database.collections.get<Conversation>('conversations').create((c: Conversation) => {
                 c.conversationId = conv.conversationId;
-                c.type = conv.type;
-                c.targetId = conv.targetId;
-                c.unreadCount = conv.unreadCount;
-                c.latestMsgId = conv.lastReadMsgId || undefined;
+                c.type = conv.type || 'direct';
+                c.targetId = conv.targetId || '';
+                c.unreadCount = conv.unreadCount || 0;
+                c.latestSeq = conv.latestSeq || undefined;
+                c.latestSummary = conv.latestSummary || undefined;
+                c.latestSenderId = conv.latestSenderId || undefined;
+                c.latestTimestamp = conv.latestTimestamp ? new Date(conv.latestTimestamp).getTime() : undefined;
+                c.lastReadSeq = conv.lastReadSeq || undefined;
                 c.createdAt = Date.now();
                 c.updatedAt = Date.now();
               });
@@ -182,14 +226,14 @@ const MainScreen = () => {
               }
             }
           } catch (e) {
-            console.log('[MainScreen] Error updating conversation:', conv.conversationId, e);
+            logger.error('MainScreen', 'Error updating conversation:', conv.conversationId, e);
           }
         }
       });
 
-      console.log('[MainScreen] Local conversations updated');
+      logger.info('MainScreen', 'Local conversations updated');
     } catch (error) {
-      console.error('[MainScreen] Sync conversations error:', error);
+      logger.error('MainScreen', 'Sync conversations error:', error);
     } finally {
       setLoading(false);
     }
@@ -200,13 +244,13 @@ const MainScreen = () => {
    */
   const loadChatSessionsFromLocal = React.useCallback(async () => {
     if (!database) {
-      console.log('[MainScreen] Database not available for loading');
+      logger.warn('MainScreen', 'Database not available for loading');
       setChatSessions([]);
       return;
     }
 
     try {
-      console.log('[MainScreen] Loading sessions from local database...');
+      logger.info('MainScreen', 'Loading sessions from local database...');
 
       // Get all conversations
       const conversations = await database.collections
@@ -214,7 +258,7 @@ const MainScreen = () => {
         .query(Q.sortBy('updated_at', Q.desc))
         .fetch();
 
-      console.log('[MainScreen] Loaded', conversations.length, 'conversations from local');
+      logger.info('MainScreen', 'Loaded', conversations.length, 'conversations from local');
 
       // Load sessions with friend/group info
       const formattedSessions = await Promise.all(
@@ -222,15 +266,25 @@ const MainScreen = () => {
           let name = 'Chat';
           let avatar: string | undefined;
 
+          logger.info('MainScreen', 'Processing conversation:', {
+            conversationId: conv.conversationId,
+            type: conv.type,
+            targetId: conv.targetId,
+            latestSummary: conv.latestSummary,
+          });
+
           if (conv.type === 'direct') {
             // Get friend info
             const friends = await database.collections
               .get<Friend>('friends')
               .query(Q.where('friend_id', Q.eq(conv.targetId)))
               .fetch();
+            logger.info('MainScreen', 'Found', friends.length, 'friends for targetId:', conv.targetId);
             if (friends.length > 0) {
               name = friends[0].name;
               avatar = friends[0].avatarUrl;
+            } else {
+              logger.warn('MainScreen', 'No friend info for:', conv.targetId);
             }
           } else {
             // Get group info
@@ -260,7 +314,6 @@ const MainScreen = () => {
               ? new Date(conv.latestTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
               : undefined,
             unreadCount: conv.unreadCount || 0,
-            latestMsgId: conv.latestMsgId,
             isPinned: conv.isPinned || false,
           };
         })
@@ -275,7 +328,7 @@ const MainScreen = () => {
 
       setChatSessions(formattedSessions);
     } catch (error: any) {
-      console.error('[MainScreen] Load local sessions error:', error.message);
+      logger.error('MainScreen', 'Load local sessions error:', error.message);
       setChatSessions([]);
     }
   }, [database]);
@@ -311,7 +364,7 @@ const MainScreen = () => {
     // Initial sync and load (only if database is available)
     const init = async () => {
       if (!database) {
-        console.log('[MainScreen] Database not ready, skipping initial sync');
+        logger.warn('MainScreen', 'Database not ready, skipping initial sync');
         setLoading(false);
         return;
       }
@@ -321,14 +374,50 @@ const MainScreen = () => {
     init();
   }, [database, syncConversations, loadChatSessionsFromLocal]);
 
+  // Set up database observer for real-time updates
+  // Observe messages table - when new message arrives, reload sessions
+  // Note: saveMessageAndUpdateConversation updates both messages and conversations in same transaction
+  useEffect(() => {
+    if (!database) {
+      logger.warn('MainScreen', 'Database not available for observer');
+      return;
+    }
+
+    logger.info('MainScreen', 'Setting up messages observer...');
+
+    // Load initial data first
+    loadChatSessionsFromLocal().then(() => {
+      logger.info('MainScreen', 'Initial sessions loaded');
+    });
+
+    // Observe messages table - when new message arrives, reload sessions
+    const messagesCollection = database.collections.get<Message>('messages');
+    const subscription = messagesCollection
+      .query(Q.sortBy('timestamp', Q.desc))
+      .observe()
+      .subscribe((observedMessages) => {
+        logger.info('MainScreen', '🔔 Messages observer triggered:', observedMessages.length, 'messages');
+        // Reload sessions when messages change
+        // Since saveMessageAndUpdateConversation uses single transaction, conversations table is already updated
+        loadChatSessionsFromLocal();
+      });
+
+    logger.info('MainScreen', 'Messages observer created');
+
+    return () => {
+      logger.info('MainScreen', 'Cleaning up messages observer');
+      subscription.unsubscribe();
+    };
+  }, [database, loadChatSessionsFromLocal]);
+
   // Refresh when screen is focused
   useFocusEffect(
     React.useCallback(() => {
       if (!database) {
-        console.log('[MainScreen] Database not ready, skipping focus sync');
+        logger.warn('MainScreen', 'Database not ready, skipping focus sync');
         return;
       }
-      console.log('[MainScreen] Screen focused, syncing conversations...');
+      logger.info('MainScreen', 'Screen focused, syncing conversations...');
       syncConversations().then(() => {
         loadChatSessionsFromLocal();
       });

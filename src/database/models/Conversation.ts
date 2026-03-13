@@ -13,8 +13,11 @@ export default class Conversation extends Model {
   @field('target_id')
   targetId!: string; // For direct: other userId, for group: groupId
 
-  @field('latest_msg_id')
-  latestMsgId?: string;
+  @field('latest_seq')
+  latestSeq?: number; // Latest message seq
+
+  @field('last_read_seq')
+  lastReadSeq?: number; // Last read message seq
 
   @field('latest_summary')
   latestSummary?: string;

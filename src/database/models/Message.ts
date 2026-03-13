@@ -38,6 +38,9 @@ export default class Message extends Model {
   @field('msg_id')
   msgId?: string; // 前端生成的消息 ID，用于去重
 
+  @field('seq')
+  seq?: number; // Server-generated sequence number for ordering
+
   @date('timestamp')
   timestamp!: number;
 

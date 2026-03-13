@@ -48,6 +48,14 @@ const getMessagesSchema = z.object({
   }),
 });
 
+const syncSeqGapSchema = z.object({
+  query: z.object({
+    conversationId: z.string(),
+    fromSeq: z.string(),
+    toSeq: z.string(),
+  }),
+});
+
 // Chat routes (protected)
 router.use(authMiddleware);
 
@@ -70,6 +78,7 @@ router.post('/conversations/:conversationId/messages/read', messageController.ma
 router.get('/sessions/sync', messageController.syncSessions);
 router.get('/messages/sync', messageController.syncMessages);
 router.post('/messages/ack', messageController.ackMessages);
+router.get('/messages/sync-seq-gap', validateRequest(syncSeqGapSchema), messageController.syncSeqGap);
 
 // New conversation routes
 router.get('/conversations/with-unread', messageController.getConversationsWithUnread);

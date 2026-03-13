@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { WS_CONFIG } from '../config/constants';
 import { TokenStorage } from './TokenStorage';
+import logger from '../utils/logger';
 import {
   WebSocketMessageData,
   WebSocketUserStatusData,
@@ -43,9 +44,11 @@ class WebSocketServiceClass {
 
   // 连接 WebSocket
   async connect() {
+    logger.info('WebSocketService', '🔗 connect() called');
+
     // 如果已经连接，直接返回
     if (this.socket?.connected) {
-      console.log('✅ WebSocket already connected');
+      logger.info('WebSocketService', '✅ WebSocket already connected');
       return Promise.resolve();
     }
 
@@ -54,13 +57,16 @@ class WebSocketServiceClass {
 
     // 如果没有 Token，不尝试连接
     if (!token) {
-      console.log('⚠️ WebSocket skipped: No token available');
+      logger.warn('WebSocketService', '⚠️ WebSocket skipped: No token available');
       return Promise.reject(new Error('No token available'));
     }
+
+    logger.info('WebSocketService', '🔗 Creating new Socket.IO connection...');
 
     return new Promise<void>((resolve, reject) => {
       // 如果已有 socket，先断开
       if (this.socket) {
+        logger.info('WebSocketService', '🔌 Disconnecting existing socket before reconnecting');
         this.socket.disconnect();
       }
 
@@ -71,20 +77,20 @@ class WebSocketServiceClass {
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
-        reconnectionAttempts: 10, // 增加重连次数
+        reconnectionAttempts: 10,
       });
 
       this.socket.on('connect', () => {
-        console.log('✅ WebSocket connected');
+        logger.info('WebSocketService', '✅ WebSocket connected, socket ID:', this.socket?.id);
         resolve();
       });
 
       this.socket.on('connect_error', (error: Error) => {
-        console.error('❌ WebSocket connection error:', error.message);
+        logger.error('WebSocketService', '❌ WebSocket connection error:', error.message);
 
         // 如果是认证失败，触发 logout 事件
         if (error.message.includes('Authentication') || error.message.includes('auth')) {
-          console.error('🔑 WebSocket authentication failed, triggering logout...');
+          logger.error('WebSocketService', '🔑 WebSocket authentication failed, triggering logout...');
           // 触发全局 logout 事件
           authEventEmitter.emit('logout');
         }
@@ -93,10 +99,10 @@ class WebSocketServiceClass {
       });
 
       this.socket.on('disconnect', (reason: string) => {
-        console.log(`⚠️ WebSocket disconnected: ${reason}`);
+        logger.info('WebSocketService', `⚠️ WebSocket disconnected: ${reason}`);
         // 如果是服务器断开，尝试重连
         if (reason === 'io server disconnect') {
-          console.log('🔄 Server disconnected, attempting to reconnect...');
+          logger.info('WebSocketService', '🔄 Server disconnected, attempting to reconnect...');
           this.socket?.connect();
         }
       });
@@ -108,8 +114,20 @@ class WebSocketServiceClass {
   private setupEventListeners() {
     if (!this.socket) return;
 
-    this.socket.on('receive_message', (data: WebSocketMessageData) => this.emit('receive_message', data));
-    this.socket.on('message_sent', (data: WebSocketMessageData) => this.emit('message_sent', data));
+    logger.info('WebSocketService', 'Setting up Socket.IO event listeners');
+
+    this.socket.on('connect', () => {
+      logger.info('WebSocketService', 'Socket connected, ID:', this.socket?.id);
+    });
+
+    this.socket.on('receive_message', (data: WebSocketMessageData) => {
+      logger.info('WebSocketService', '🔔 Received receive_message event from server:', JSON.stringify(data));
+      this.emit('receive_message', data);
+    });
+    this.socket.on('message_sent', (data: WebSocketMessageData) => {
+      logger.info('WebSocketService', '📤 Received message_sent event:', JSON.stringify(data));
+      this.emit('message_sent', data);
+    });
     this.socket.on('user_status_changed', (data: WebSocketUserStatusData) => this.emit('user_status_changed', data));
     this.socket.on('user_typing', (data: WebSocketTypingData) => this.emit('user_typing', data));
     this.socket.on('user_stopped_typing', (data: WebSocketTypingData) => this.emit('user_stopped_typing', data));
@@ -117,11 +135,13 @@ class WebSocketServiceClass {
     this.socket.on('new_notification', (data: WebSocketNotificationData) => this.emit('new_notification', data));
     this.socket.on('assistant_response_chunk', (data: any) => this.emit('assistant_response_chunk', data));
     this.socket.on('translate_message_response', (data: any) => {
-      console.log('[WebSocketService] Received translate_message_response:', data);
+      logger.info('WebSocketService', 'Received translate_message_response:', JSON.stringify(data));
       this.emit('translate_message_response', data);
     });
-    this.socket.on('error', (error: Error) => console.error('WebSocket error:', error));
-    this.socket.on('disconnect', () => console.log('⚠️ WebSocket disconnected'));
+    this.socket.on('error', (error: Error) => logger.error('WebSocketService', 'Socket error:', error.message));
+    this.socket.on('disconnect', (reason: string) => {
+      logger.info('WebSocketService', '⚠️ Socket disconnected, reason:', reason);
+    });
   }
 
   sendMessage(conversationId: string, text: string, type = 'text', msgId?: string, chatType: 'direct' | 'group' = 'direct') {
@@ -184,15 +204,22 @@ class WebSocketServiceClass {
       this.eventHandlers.set(event, new Set());
     }
     this.eventHandlers.get(event)!.add(handler);
+    logger.info('WebSocketService', `📝 Listener registered for event: ${event}, total listeners: ${this.eventHandlers.get(event)!.size}`);
   }
 
   off(event: string, handler: WebSocketEventHandler) {
-    this.eventHandlers.get(event)?.delete(handler);
+    const listeners = this.eventHandlers.get(event);
+    const hadListener = listeners?.has(handler) ?? false;
+    listeners?.delete(handler);
+    logger.info('WebSocketService', `🗑️ Listener removed for event: ${event}, remaining: ${listeners?.size ?? 0}`);
   }
 
   public emit(event: string, data: unknown) {
+    const listeners = this.eventHandlers.get(event);
+    logger.info('WebSocketService', `📢 Emitting event: ${event}, listeners count: ${listeners?.size ?? 0}`);
+
     // 触发本地监听器
-    this.eventHandlers.get(event)?.forEach(handler => handler(data));
+    listeners?.forEach(handler => handler(data));
     
     // 发送到 Socket.IO 服务器
     if (this.socket?.connected) {
@@ -205,7 +232,9 @@ class WebSocketServiceClass {
   disconnect() {
     this.socket?.disconnect();
     this.socket = null;
-    this.eventHandlers.clear();
+    // 注意：不清除 eventHandlers，因为监听器可能还需要
+    // eventHandlers 会在下次 connect 时由 setupEventListeners 重新注册到新的 socket
+    logger.info('WebSocketService', 'WebSocket disconnected');
   }
 
   isConnected(): boolean {

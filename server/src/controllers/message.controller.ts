@@ -136,13 +136,13 @@ class MessageController {
   }
 
   /**
-   * Sync messages - get messages after lastReadMsgId (or afterMsgId) and mark them as read
-   * Supports batch loading with afterMsgId and limit parameters
+   * Sync messages - get messages after afterSeq and mark them as read
+   * Supports batch loading with afterSeq and limit parameters
    */
   async syncMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id; // Current user ID
-      const { conversationId, chatType, afterMsgId, limit } = req.query;
+      const { conversationId, chatType, afterSeq, limit } = req.query;
 
       if (!conversationId) {
         res.status(400).json({
@@ -156,7 +156,7 @@ class MessageController {
         userId,
         conversationId as string,
         (chatType as string) || 'direct',
-        afterMsgId as string,  // Optional: start from this msgId
+        afterSeq ? parseInt(afterSeq as string) : undefined,  // Optional: start from this seq
         limit ? parseInt(limit as string) : 50  // Optional: batch size
       );
 
@@ -173,17 +173,17 @@ class MessageController {
   }
 
   /**
-   * Acknowledge and update lastReadMsgId
+   * Acknowledge and update lastReadSeq
    */
   async ackMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id; // Current user ID
-      const { conversationId, minMsgId } = req.body;
+      const { conversationId, minSeq } = req.body;
 
-      if (!conversationId || !minMsgId) {
+      if (!conversationId || minSeq === undefined) {
         res.status(400).json({
           success: false,
-          error: 'conversationId and minMsgId are required',
+          error: 'conversationId and minSeq are required',
         });
         return;
       }
@@ -191,7 +191,7 @@ class MessageController {
       const result = await messageService.ackMessages(
         userId,
         conversationId,
-        minMsgId
+        parseInt(minSeq as string)
       );
 
       res.status(200).json({
@@ -200,6 +200,38 @@ class MessageController {
       });
     } catch (error: any) {
       logger.error('Ack messages controller error:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Sync messages with seq gap
+   * Returns messages between fromSeq and toSeq (exclusive)
+   */
+  async syncSeqGap(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { conversationId, fromSeq, toSeq } = req.query;
+
+      if (!conversationId || !fromSeq || !toSeq) {
+        res.status(400).json({
+          success: false,
+          error: 'conversationId, fromSeq, and toSeq are required',
+        });
+        return;
+      }
+
+      const messages = await messageService.syncSeqGap(
+        conversationId as string,
+        parseInt(fromSeq as string),
+        parseInt(toSeq as string)
+      );
+
+      res.status(200).json({
+        success: true,
+        data: { messages },
+      });
+    } catch (error: any) {
+      logger.error('Sync seq gap controller error:', error);
       next(error);
     }
   }

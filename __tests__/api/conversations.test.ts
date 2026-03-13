@@ -112,16 +112,16 @@ describe('Conversations API', () => {
   });
 
   describe('updateReadStatus', () => {
-    it('should update read status with last read message ID', async () => {
+    it('should update read status with last read seq', async () => {
       mockedApiService.request.mockResolvedValue({ success: true });
 
-      await updateReadStatus('user_a_user_b', 'msg_123');
+      await updateReadStatus('user_a_user_b', 123);
 
       expect(mockedApiService.request).toHaveBeenCalledWith(
         '/api/conversations/user_a_user_b/read',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ lastReadMsgId: 'msg_123' }),
+          body: JSON.stringify({ lastReadSeq: 123 }),
         })
       );
     });
@@ -129,13 +129,13 @@ describe('Conversations API', () => {
     it('should update read status for group chat', async () => {
       mockedApiService.request.mockResolvedValue({ success: true });
 
-      await updateReadStatus('group_g1', 'msg_456');
+      await updateReadStatus('group_g1', 456);
 
       expect(mockedApiService.request).toHaveBeenCalledWith(
         '/api/conversations/group_g1/read',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ lastReadMsgId: 'msg_456' }),
+          body: JSON.stringify({ lastReadSeq: 456 }),
         })
       );
     });

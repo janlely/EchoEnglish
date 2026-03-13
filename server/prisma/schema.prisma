@@ -100,7 +100,7 @@ model Conversation {
   groupId         String   // 关联的群 ID
   name            String?  // 群名称 (冗余，便于查询)
   avatarUrl       String?  // 群头像 (冗余)
-  latestMsgId     String?
+  latestSeq       Int?
   latestSummary   String?
   latestSenderId  String?
   latestTimestamp DateTime?
@@ -117,8 +117,8 @@ model UserConversationState {
   conversationId String   // 单聊：direct_userId1_userId2, 群聊：group_cuid
   type           String   // 'direct' | 'group'
   targetId       String   // 单聊：对方 userId, 群聊：groupId
-  
-  lastReadMsgId  String?
+
+  lastReadSeq    Int?
   unreadCount    Int      @default(0)
   updatedAt      DateTime @updatedAt
 
@@ -145,6 +145,7 @@ model ContactSyncCursor {
 model Message {
   id             String   @id @default(cuid())
   msgId          String   @unique // Frontend-generated message ID, for deduplication
+  seq            Int      @default(0) // Server-generated sequence number, strictly incremental within conversation
   conversationId String?  // Conversation ID: direct_userId1_userId2 or group_{groupId}
   senderId       String
   text           String
@@ -155,10 +156,9 @@ model Message {
 
   sender         User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
-  @@index([conversationId])
-  @@index([senderId])
+  @@unique([conversationId, seq])
+  @@index([conversationId, seq])
   @@index([msgId])
-  @@index([createdAt])
 }
 
 // Notification model

@@ -90,7 +90,6 @@ export const useMessageSender = ({
 
         if (existingConversations.length > 0) {
           await existingConversations[0].update((c: Conversation) => {
-            c.latestMsgId = msgId;
             c.latestSummary = inputText;
             c.latestSenderId = currentUserId;
             c.latestTimestamp = timestamp;
@@ -101,7 +100,6 @@ export const useMessageSender = ({
             c.conversationId = conversationId;
             c.type = chatType;
             c.targetId = chatId;
-            c.latestMsgId = msgId;
             c.latestSummary = inputText;
             c.latestSenderId = currentUserId;
             c.latestTimestamp = timestamp;
@@ -239,7 +237,6 @@ export const useMessageSender = ({
 
         if (existingConversations.length > 0) {
           await existingConversations[0].update((c: Conversation) => {
-            c.latestMsgId = msgId;
             c.latestSummary = selectedText;
             c.latestSenderId = user?.id || '';
             c.latestTimestamp = timestamp;
@@ -250,7 +247,6 @@ export const useMessageSender = ({
             c.conversationId = conversationId;
             c.type = chatType;
             c.targetId = chatId;
-            c.latestMsgId = msgId;
             c.latestSummary = selectedText;
             c.latestSenderId = user?.id || '';
             c.latestTimestamp = timestamp;

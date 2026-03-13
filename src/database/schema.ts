@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 10, // Added is_pinned field to conversations table
+  version: 11, // Reverted: removed latest_msg_id from conversations table
   tables: [
     // ===== User tables =====
 
@@ -102,10 +102,11 @@ export const schema = appSchema({
         { name: 'conversation_id', type: 'string' },  // 主键：direct_xxx 或 group_xxx
         { name: 'type', type: 'string' },             // 'direct' | 'group'
         { name: 'target_id', type: 'string' },        // 单聊：对方 userId, 群聊：groupId
-        { name: 'latest_msg_id', type: 'string', isOptional: true },
+        { name: 'latest_seq', type: 'number', isOptional: true },  // Latest message seq
         { name: 'latest_summary', type: 'string', isOptional: true },
         { name: 'latest_sender_id', type: 'string', isOptional: true },
         { name: 'latest_timestamp', type: 'number', isOptional: true },
+        { name: 'last_read_seq', type: 'number', isOptional: true },  // Last read seq
         { name: 'unread_count', type: 'number', isOptional: true },
         { name: 'is_pinned', type: 'boolean' },
         { name: 'created_at', type: 'number' },
@@ -120,6 +121,7 @@ export const schema = appSchema({
       name: 'messages',
       columns: [
         { name: 'conversation_id', type: 'string' },
+        { name: 'seq', type: 'number' },  // Server-generated sequence number
         { name: 'text', type: 'string' },
         { name: 'translation', type: 'string', isOptional: true }, // Translation cache
         { name: 'sender_id', type: 'string' },

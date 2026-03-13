@@ -47,7 +47,7 @@ export const useChatMessages = ({
 }: UseChatMessagesParams) => {
   const [messages, setMessages] = useState<MessageInterface[]>([]);
   const [loading, setLoading] = useState(true);
-  const [latestMsgId, setLatestMsgId] = useState<string | null>(null);
+  const [latestSeq, setLatestSeq] = useState<number>(0);
 
   // 存储好友头像的 ref
   const friendAvatarsRef = useRef<Map<string, string>>(new Map());
@@ -56,51 +56,30 @@ export const useChatMessages = ({
   const sendingTimeouts = useRef<Map<string, any>>(new Map());
 
   /**
-   * 保存 WebSocket 消息到本地数据库
+   * 获取本地最新 seq（异步版本）
    */
-  const saveMessageToLocal = useCallback(async (data: WebSocketMessageData) => {
-    if (!database) return;
+  const getLocalLatestSeq = useCallback(async (): Promise<number | undefined> => {
+    if (!database) return undefined;
 
     try {
-      logger.debug('useChatMessages', 'saveMessageToLocal called with:', data);
+      // 从 messages 表获取最新 seq
+      const latestMessages = await database.collections
+        .get<Message>('messages')
+        .query(
+          Q.where('conversation_id', Q.eq(conversationId)),
+          Q.sortBy('timestamp', Q.desc),
+          Q.take(1)
+        ).fetch();
 
-      let localMessage = null;
-      if (data.msgId) {
-        const messagesByMsgId = await database.collections
-          .get<Message>('messages')
-          .query(Q.where('msg_id', Q.eq(data.msgId)))
-          .fetch();
-        localMessage = messagesByMsgId[0];
-        logger.debug('useChatMessages', 'Found message by msgId:', localMessage ? 'yes' : 'no');
+      if (latestMessages && latestMessages.length > 0) {
+        return latestMessages[0].seq;
       }
-
-      if (localMessage) {
-        await database.write(async () => {
-          await localMessage.update((msg: Message) => {
-            msg.status = 'sent';
-          });
-        });
-        logger.debug('useChatMessages', 'Message status updated to sent');
-      } else {
-        await database.write(async () => {
-          await database.collections.get<Message>('messages').create((message: Message) => {
-            message.msgId = data.msgId;
-            message.conversationId = data.conversationId || conversationId;
-            message.chatType = data.chatType || 'direct';
-            message.targetId = data.targetId || chatId;
-            message.text = data.text;
-            message.senderId = data.senderId;
-            message.chatSessionId = data.targetId || chatId;
-            message.status = data.status || 'sent';
-            message.timestamp = data.createdAt ? new Date(data.createdAt).getTime() : Date.now();
-          });
-        });
-        logger.debug('useChatMessages', 'New message saved to local');
-      }
+      return undefined;
     } catch (error) {
-      logger.error('useChatMessages', 'Save message to local failed:', error);
+      logger.error('useChatMessages', 'Get local latest seq error:', error);
+      return undefined;
     }
-  }, [database, conversationId, chatId]);
+  }, [database, conversationId]);
 
   /**
    * 处理消息发送确认（WebSocket message_sent 事件）
@@ -136,7 +115,6 @@ export const useChatMessages = ({
 
             if (conversations.length > 0) {
               await conversations[0].update((c: any) => {
-                c.latestMsgId = data.msgId;
                 c.latestSummary = messages[0].text;
                 c.latestSenderId = data.senderId || 'unknown';
                 c.updatedAt = Date.now();
@@ -315,12 +293,34 @@ export const useChatMessages = ({
       });
 
     // WebSocket 消息监听
-    const unsubscribeMessage = onMessage((data: any) => {
+    const unsubscribeMessage = onMessage(async (data: any) => {
       logger.info('useChatMessages', 'Received message from WebSocket:', data);
-      saveMessageToLocal(data);
 
-      if (data.msgId && (!latestMsgId || data.msgId > latestMsgId)) {
-        setLatestMsgId(data.msgId);
+      // Note: MessageService already handles saving messages globally
+      // We don't need to save here - the database observer will update UI when MessageService saves
+
+      // 检查是否是自己发送的消息（通过 senderId 判断）
+      const isFromMe = data.senderId === user?.id;
+
+      if (data.seq && data.seq > latestSeq) {
+        setLatestSeq(data.seq);
+      }
+
+      // 如果不是自己发送的消息，检查 seq 连续性
+      if (!isFromMe && data.conversationId === conversationId && data.seq) {
+        const localLatestSeq = await getLocalLatestSeq();
+        logger.info('useChatMessages', 'Local latest seq:', localLatestSeq, 'Received seq:', data.seq);
+
+        // 检查 seq 是否连续（允许乱序，本地去重）
+        if (localLatestSeq && data.seq > localLatestSeq + 1) {
+          logger.info('useChatMessages', 'Seq gap detected:', localLatestSeq, '->', data.seq);
+
+          // 检查是否可以调用 syncSeqGap
+          const { messageService } = require('../../../services/MessageService');
+          if (messageService.checkCanSyncGap()) {
+            messageService.syncSeqGap(conversationId, localLatestSeq, data.seq);
+          }
+        }
       }
     });
 
@@ -363,7 +363,6 @@ export const useChatMessages = ({
     syncConversationInfo,
     syncUserInfo,
     loadMessagesFromDatabase,
-    saveMessageToLocal,
     handleMessageSent,
   ]);
 
@@ -371,7 +370,7 @@ export const useChatMessages = ({
     messages,
     setMessages,
     loading,
-    latestMsgId,
+    latestSeq,
     sendingTimeouts,
   };
 };

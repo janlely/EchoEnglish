@@ -29,6 +29,28 @@ interface UseChatSyncParams {
 
 export const useChatSync = ({ database, conversationId, chatId, chatType }: UseChatSyncParams) => {
   /**
+   * 获取本地最新 seq
+   */
+  const getLocalLatestSeq = useCallback(async (convId: string): Promise<number | undefined> => {
+    if (!database) return undefined;
+
+    try {
+      const conversations = await database.collections
+        .get<Conversation>('conversations')
+        .query(Q.where('conversation_id', Q.eq(convId)))
+        .fetch();
+
+      if (conversations.length > 0) {
+        return conversations[0].latestSeq;
+      }
+      return undefined;
+    } catch (error) {
+      logger.error('useChatSync', 'Get local latest seq error:', error);
+      return undefined;
+    }
+  }, [database]);
+
+  /**
    * 同步群组成员信息
    */
   const syncGroupMembers = useCallback(async (groupId: string, userIds: string[]) => {
@@ -187,7 +209,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
   /**
    * 消息确认（ACK）
    */
-  const ackMessages = useCallback(async (minMsgId: string) => {
+  const ackMessages = useCallback(async (minSeq: number) => {
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -195,7 +217,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
         return;
       }
 
-      logger.debug('useChatSync', 'Acking messages, minMsgId:', minMsgId);
+      logger.debug('useChatSync', 'Acking messages, minSeq:', minSeq);
 
       const response = await fetch(`${API_CONFIG.BASE_URL}/api/chats/messages/ack`, {
         method: 'POST',
@@ -205,14 +227,14 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
         },
         body: JSON.stringify({
           conversationId,
-          minMsgId,
+          minSeq,
         }),
       });
 
       const data: any = await response.json();
 
       if (response.ok && data.success) {
-        logger.debug('useChatSync', 'Acked messages, minMsgId:', minMsgId);
+        logger.debug('useChatSync', 'Acked messages, minSeq:', minSeq);
       } else {
         logger.error('useChatSync', 'Ack failed:', data.error);
       }
@@ -233,10 +255,31 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
         return;
       }
 
-      // Step 1: 批量获取所有消息
-      logger.debug('useChatSync', 'Step 1: Fetching all messages in batches');
+      // Step 1: 获取本地最新 seq（从本地已存储的消息中获取，不是从 Conversation 表）
+      logger.debug('useChatSync', 'Step 1: Getting local latest seq from messages table');
+      let afterSeq: number | undefined = undefined;
+      
+      if (database) {
+        const localMessages = await database.collections
+          .get<Message>('messages')
+          .query(
+            Q.where('conversation_id', Q.eq(conversationId)),
+            Q.sortBy('seq', Q.desc),
+            Q.take(1)
+          )
+          .fetch();
+        
+        if (localMessages && localMessages.length > 0) {
+          afterSeq = localMessages[0].seq;
+          logger.debug('useChatSync', 'Local latest seq from messages:', afterSeq);
+        } else {
+          logger.debug('useChatSync', 'No local messages, will sync all');
+        }
+      }
+
+      // Step 2: 批量获取所有消息
+      logger.debug('useChatSync', 'Step 2: Fetching all messages in batches');
       let hasMore = true;
-      let afterMsgId: string | undefined = undefined;
       const batchSize = 1000;
       const allMessages: any[] = [];
       const allSenderIds = new Set<string>();
@@ -246,9 +289,9 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
           `conversationId=${conversationId}&` +
           `chatType=${chatType}&` +
           `limit=${batchSize}` +
-          (afterMsgId ? `&afterMsgId=${afterMsgId}` : '');
+          (afterSeq !== undefined ? `&afterSeq=${afterSeq}` : '');
 
-        logger.debug('useChatSync', 'Fetching batch, afterMsgId:', afterMsgId);
+        logger.debug('useChatSync', 'Fetching batch, afterSeq:', afterSeq);
 
         const response = await fetch(url, {
           headers: {
@@ -272,7 +315,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
           data.data.messages.forEach((m: any) => {
             if (m.senderId) allSenderIds.add(m.senderId as string);
           });
-          afterMsgId = data.data.latestMsgId;
+          afterSeq = data.data.latestSeq;
           hasMore = data.data.hasMore;
         } else {
           hasMore = false;
@@ -324,10 +367,10 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
         logger.debug('useChatSync', 'All messages saved');
 
         // Step 4: 确认消息
-        const lastMsgId = allMessages[allMessages.length - 1]?.msgId;
-        if (lastMsgId) {
-          logger.debug('useChatSync', 'Step 4: Calling ackMessages with:', lastMsgId);
-          await ackMessages(lastMsgId);
+        const lastSeq = allMessages[allMessages.length - 1]?.seq;
+        if (lastSeq !== undefined) {
+          logger.debug('useChatSync', 'Step 4: Calling ackMessages with:', lastSeq);
+          await ackMessages(lastSeq);
 
           // 清除本地未读数
           const conversations = await database!.collections
@@ -339,6 +382,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
             await database!.write(async () => {
               await conversations[0].update((c: Conversation) => {
                 c.unreadCount = 0;
+                c.lastReadSeq = lastSeq;
                 c.updatedAt = Date.now();
               });
             });

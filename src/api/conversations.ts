@@ -7,8 +7,8 @@ export interface ConversationInfo {
   name: string;
   avatarUrl?: string | null;
   unreadCount: number;
-  lastReadMsgId?: string | null;
-  latestMsgId?: string | null;
+  lastReadSeq?: number | null;
+  latestSeq?: number | null;
   latestSummary?: string | null;
   latestSenderId?: string | null;
   latestTimestamp?: string | null;
@@ -33,7 +33,7 @@ export interface Message {
 export interface SyncMessagesResponse {
   messages: Message[];
   hasMore: boolean;
-  latestMsgId?: string;
+  latestSeq?: number;
 }
 
 /**
@@ -63,10 +63,10 @@ export const getConversationInfo = async (
  */
 export const updateReadStatus = async (
   conversationId: string,
-  lastReadMsgId: string
+  lastReadSeq: number
 ): Promise<void> => {
   await ApiService.request(`/api/conversations/${conversationId}/read`, {
     method: 'POST',
-    body: JSON.stringify({ lastReadMsgId }),
+    body: JSON.stringify({ lastReadSeq }),
   });
 };

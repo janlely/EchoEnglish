@@ -85,6 +85,7 @@ class WebSocketService {
 
     // Join user's personal room
     socket.join(`user:${userId}`);
+    logger.info(`User ${userId} joined user:${userId} room`);
 
     // Broadcast user online status
     this.broadcastUserStatus(userId, true);
@@ -124,10 +125,15 @@ class WebSocketService {
         logger.info(`[WebSocket] Emitting message_sent to ${userId}:`, JSON.stringify(messageSentData));
         socket.emit('message_sent', messageSentData);
 
-        // Broadcast to chat room
+        // Broadcast to chat room（for users who joined the room, e.g., in ChatDetailScreen）
         const roomName = `chat:${data.targetId}`;
         logger.info(`[WebSocket] Broadcasting to room ${roomName}`);
         this.io?.to(roomName).emit('receive_message', message);
+
+        // Also push to online receivers directly (for users not in the chat room, e.g., in MainScreen)
+        logger.info(`[WebSocket] start Pushing to online receivers directly`);
+        await this._pushToOnlineReceivers(data.targetId, userId, message, data.chatType);
+        logger.info(`[WebSocket] end Pushing to online receivers directly`);
 
         // Send notification to other participants
         await this.sendNotificationToOthers(data.targetId, userId, message);
@@ -461,42 +467,48 @@ Directly output only the Chinese translation, no explanations.`;
 
   /**
    * Push message to online receivers
-   * 判断接收者是否在线，在线则实时推送
-   * 注：当前版本暂不使用，消息通过 broadcast 发送到 chat room
+   * 判断接收者是否在线，在线则实时推送到 user:${userId} 房间
    */
   private async _pushToOnlineReceivers(
-    chatSessionId: string,
+    targetId: string,
     senderId: string,
-    message: any
+    message: any,
+    chatType?: 'direct' | 'group'
   ) {
+    logger.info(`[WebSocket] _pushToOnlineReceivers called with targetId: ${targetId}, senderId: ${senderId}, chatType: ${chatType}`);
+
     try {
       // 判断是私聊还是群聊
-      const isPrivateChat = chatSessionId.includes('-');
+      const isGroupChat = chatType === 'group' || targetId.startsWith('group_');
+      logger.info(`[WebSocket] Chat type: ${isGroupChat ? 'group' : 'private'}`);
 
-      if (isPrivateChat) {
-        // 私聊：chatSessionId 是 friendship.id
-        // 需要查找对方用户 ID
-        const friendship = await prisma.friendship.findUnique({
-          where: { id: chatSessionId },
-        });
+      if (!isGroupChat) {
+        // 私聊：targetId 是 conversationId (格式：user1_user2)，需要提取接收者 ID
+        const parts = targetId.split('_');
+        let receiverId: string;
 
-        if (friendship) {
-          const receiverId = friendship.userId1 === senderId
-            ? friendship.userId2
-            : friendship.userId1;
+        if (parts.length === 2) {
+          // conversationId 格式：user1_user2，接收者是不同于 senderId 的那个
+          receiverId = parts[0] === senderId ? parts[1] : parts[0];
+        } else {
+          // 如果只有一个部分，targetId 本身就是接收者 ID
+          receiverId = targetId;
+        }
 
-          // 检查接收者是否在线
-          if (this.userSockets.has(receiverId)) {
-            logger.info(`[WebSocket] Pushing message to online user: ${receiverId}`);
-            // 在线，推送消息
-            this.sendToUser(receiverId, 'receive_message', message);
-          } else {
-            logger.info(`[WebSocket] User ${receiverId} is offline, skip push`);
-          }
+        logger.info(`[WebSocket] Private chat, calculated receiverId: ${receiverId}`);
+        logger.info(`[WebSocket] userSockets has receiver: ${this.userSockets.has(receiverId)}, all online users: ${Array.from(this.userSockets.keys()).join(', ')}`);
+
+        // 检查接收者是否在线
+        if (this.userSockets.has(receiverId)) {
+          logger.info(`[WebSocket] Pushing message to online user: ${receiverId}`);
+          // 在线，推送消息到 user:${receiverId} 房间
+          this.sendToUser(receiverId, 'receive_message', message);
+        } else {
+          logger.info(`[WebSocket] User ${receiverId} is offline, skip push`);
         }
       } else {
-        // 群聊：获取所有参与者
-        const groupId = chatSessionId.replace('group_', '');
+        // 群聊：targetId 是 groupId
+        const groupId = targetId.replace('group_', '');
         const members = await prisma.groupMember.findMany({
           where: { groupId },
         });
@@ -516,7 +528,7 @@ Directly output only the Chinese translation, no explanations.`;
         }
       }
     } catch (error: any) {
-      logger.error('Push to online receivers error:', error);
+      logger.error('Push to online receivers error:', error.message);
     }
   }
 

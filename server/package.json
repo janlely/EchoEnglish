@@ -16,6 +16,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "sender:test": "ts-node sender_test.ts",
     "db:dev": "DATABASE_URL=\"file:./dev.db\" prisma migrate dev",
     "db:prod": "prisma migrate deploy",
     "db:generate": "prisma generate",
