@@ -8,6 +8,7 @@ import {
   FlatList,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -200,9 +201,11 @@ const CreateGroupChatScreen = () => {
       >
         <View style={styles.avatarContainer}>
           {item.avatarUrl ? (
-            <View style={styles.avatarImage}>
-              <Text style={styles.avatarText}>{item.name.charAt(0)}</Text>
-            </View>
+            <Image
+              source={{ uri: getAvatarUrl(item.avatarUrl, 45) }}
+              style={styles.avatarImage}
+              onError={(e) => console.log('Avatar load error:', e.nativeEvent.error)}
+            />
           ) : (
             <View style={styles.avatarPlaceholder}>
               <Text style={styles.avatarText}>{item.name.charAt(0)}</Text>

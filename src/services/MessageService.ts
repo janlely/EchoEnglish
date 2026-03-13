@@ -14,18 +14,47 @@ import { Q } from '@nozbe/watermelondb';
 import { Message, Conversation, Friend } from '../database/models';
 import { WebSocketMessageData } from '../types/websocket';
 import logger from '../utils/logger';
+import { TokenStorage } from './TokenStorage';
 
 type MessageListener = (data: WebSocketMessageData) => void;
+type ConversationUpdateListener = () => void;
 
 class MessageService {
   private database: Database | null = null;
   private wsCleanup: (() => void) | null = null;
   private messageListeners: Set<MessageListener> = new Set();
+  private conversationUpdateListeners: Set<ConversationUpdateListener> = new Set(); // 会话更新监听器
   private isSyncingGap = false;
   private isSyncingAll = false;
   private processedMsgIds = new Set<string>(); // 已处理的消息 ID 缓存（内存去重）
   private processingMsgIds = new Map<string, Promise<any>>(); // 正在处理中的消息 ID -> Promise（防止并发重复处理）
   private readonly MAX_PROCESSED_MSG_IDS = 1000; // 最多缓存 1000 个 ID
+
+  /**
+   * 解析 conversationId 获取 targetId
+   * - 单聊：conversationId 格式为 "userId_otherUserId"，返回对方用户 ID（非 senderId 的那个）
+   * - 群聊：conversationId 格式为 "group_groupId"，返回 groupId
+   */
+  private parseTargetId(conversationId: string, chatType: string, senderId: string): string {
+    if (chatType === 'group') {
+      // 群聊：conversationId = "group_" + groupId
+      if (conversationId.startsWith('group_')) {
+        return conversationId.replace('group_', '');
+      }
+      return conversationId;
+    }
+
+    // 单聊：conversationId = "userId_otherUserId"
+    // 由于 UUID 本身包含 - 但不包含 _，可以用 _ 分割
+    // 但注意：两个 UUID 直接用 _ 连接，所以 split('_') 会得到多个部分
+    // 格式：{uuid1}_{uuid2}，其中 uuid 格式为 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    // 所以 conversationId 格式：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx_yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
+
+    // 简单方法：senderId 是对话的一方，targetId 应该是另一方
+    // 对于收到的消息，senderId 是发送者，targetId 也应该是发送者（因为我们要显示对方的信息）
+    // 所以直接返回 senderId 作为 targetId
+    return senderId;
+  }
 
   /**
    * 设置数据库实例
@@ -244,6 +273,10 @@ class MessageService {
           .query(Q.where('conversation_id', Q.eq(conversationId)))
           .fetch();
 
+        // 计算 targetId：优先使用 data.targetId，如果没有则解析 conversationId
+        const targetId = data.targetId || this.parseTargetId(conversationId, data.chatType || 'direct', data.senderId);
+        logger.info('MessageService', 'Parsed targetId:', targetId, 'from conversationId:', conversationId, 'senderId:', data.senderId);
+
         if (conversations.length > 0) {
           logger.info('MessageService', '📝 Updating existing conversation:', conversationId);
           await conversations[0].update((conv: Conversation) => {
@@ -259,7 +292,7 @@ class MessageService {
           await db.collections.get<Conversation>('conversations').create((conv: Conversation) => {
             conv.conversationId = conversationId;
             conv.type = data.chatType || 'direct';
-            conv.targetId = data.targetId || conversationId;
+            conv.targetId = targetId;
             conv.latestSeq = data.seq || 0;
             conv.latestSummary = data.text;
             conv.latestSenderId = data.senderId;
@@ -296,6 +329,9 @@ class MessageService {
         logger.info('MessageService', 'Direct chat detected, syncing friend info:', data.senderId);
         await this.syncFriendInfoIfMissing(data.senderId);
       }
+
+      // 5. 通知会话更新监听器（在 db.write 事务完成后）
+      this.notifyConversationUpdate();
     } catch (error) {
       logger.error('MessageService', 'Save message and update conversation error:', error);
       throw error;
@@ -481,6 +517,24 @@ class MessageService {
     return () => {
       this.messageListeners.delete(callback);
     };
+  }
+
+  /**
+   * 订阅会话更新事件
+   * 当新消息到来导致会话创建或更新时触发（在 db.write 事务完成后）
+   */
+  onConversationUpdate(callback: ConversationUpdateListener): () => void {
+    this.conversationUpdateListeners.add(callback);
+    return () => {
+      this.conversationUpdateListeners.delete(callback);
+    };
+  }
+
+  /**
+   * 通知所有会话更新监听器
+   */
+  private notifyConversationUpdate() {
+    this.conversationUpdateListeners.forEach(callback => callback());
   }
 }
 
