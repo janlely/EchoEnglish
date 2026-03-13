@@ -29,6 +29,19 @@ class WebSocketService {
         credentials: true,
       },
       path: '/socket.io',
+      // 弱网优化配置
+      pingTimeout: 10000, // 10 秒超时（默认 5000）
+      pingInterval: 15000, // 15 秒心跳（默认 25000）
+      connectTimeout: 10000, // 10 秒连接超时（默认 10000）
+      transports: ['websocket', 'polling'], // 允许降级到 polling
+      allowUpgrades: true, // 允许从 polling 升级到 websocket
+      perMessageDeflate: {
+        threshold: 1024, // 小于 1KB 不压缩
+        level: 6, // 压缩级别
+      },
+      httpCompression: {
+        threshold: 1024,
+      },
     });
 
     this.io.use(async (socket: AuthSocket, next) => {

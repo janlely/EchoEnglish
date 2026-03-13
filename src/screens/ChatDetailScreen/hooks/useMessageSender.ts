@@ -30,7 +30,8 @@ interface UseMessageSenderParams {
     text: string,
     type: string,
     msgId: string,
-    chatType: string
+    chatType: string,
+    onSent?: (success: boolean) => void
   ) => void;
   sendingTimeouts: RefObject<Map<string, any>>;
 }
@@ -111,13 +112,30 @@ export const useMessageSender = ({
       });
       logger.debug('useMessageSender', 'Message saved to local with sending status');
 
-      // 2. 通过 WebSocket 发送
+      // 2. 通过 WebSocket 发送（带超时回调）
       logger.debug('useMessageSender', 'Calling sendMessage via WebSocket with msgId:', msgId);
-      sendMessage(conversationId, inputText, 'text', msgId, chatType);
 
-      // 设置超时定时器
+      // 处理发送结果
+      const handleSentResult = (success: boolean) => {
+        if (success) {
+          logger.debug('useMessageSender', 'Message sent successfully:', msgId);
+        } else {
+          logger.warn('useMessageSender', 'Message send failed/timeout:', msgId);
+          // 标记为失败
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.msgId === msgId ? { ...msg, sending: false, failed: true } : msg
+            )
+          );
+        }
+        sendingTimeouts.current?.delete(msgId);
+      };
+
+      sendMessage(conversationId, inputText, 'text', msgId, chatType, handleSentResult);
+
+      // 设置超时定时器（备用，防止回调丢失）
       const timeout = setTimeout(() => {
-        logger.warn('useMessageSender', 'Message sending timeout:', msgId);
+        logger.warn('useMessageSender', 'Message sending timeout (fallback):', msgId);
         setMessages(prev =>
           prev.map(msg =>
             msg.msgId === msgId ? { ...msg, sending: false, failed: true } : msg
@@ -174,12 +192,26 @@ export const useMessageSender = ({
         )
       );
 
-      // 重新发送
-      sendMessage(conversationId, message.text, 'text', newMsgId, chatType);
+      // 重新发送（带超时回调）
+      const handleSentResult = (success: boolean) => {
+        if (success) {
+          logger.debug('useMessageSender', 'Retry message sent successfully:', newMsgId);
+        } else {
+          logger.warn('useMessageSender', 'Retry message send failed/timeout:', newMsgId);
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.msgId === newMsgId ? { ...msg, sending: false, failed: true } : msg
+            )
+          );
+        }
+        sendingTimeouts.current?.delete(newMsgId);
+      };
 
-      // 设置新的超时定时器
+      sendMessage(conversationId, message.text, 'text', newMsgId, chatType, handleSentResult);
+
+      // 设置新的超时定时器（备用）
       const timeout = setTimeout(() => {
-        logger.warn('useMessageSender', 'Retry message timeout:', newMsgId);
+        logger.warn('useMessageSender', 'Retry message timeout (fallback):', newMsgId);
         setMessages(prev =>
           prev.map(msg =>
             msg.msgId === newMsgId ? { ...msg, sending: false, failed: true } : msg

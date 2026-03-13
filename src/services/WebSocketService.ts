@@ -10,6 +10,9 @@ import {
   WebSocketNotificationData,
 } from '../types/websocket';
 
+// 发送超时配置
+const SEND_TIMEOUT = 10000; // 10 秒
+
 // Simple cross-platform event emitter
 type AuthEventHandler = () => void;
 
@@ -41,6 +44,8 @@ type WebSocketEventHandler<T = unknown> = (data: T) => void;
 class WebSocketServiceClass {
   private socket: Socket | null = null;
   private eventHandlers = new Map<string, Set<WebSocketEventHandler>>();
+  // 消息发送超时管理：msgId -> { timeout, callback }
+  private pendingSends = new Map<string, { timeout: ReturnType<typeof setTimeout>; callback: (success: boolean) => void }>();
 
   // 连接 WebSocket
   async connect() {
@@ -73,11 +78,15 @@ class WebSocketServiceClass {
       this.socket = io(WS_CONFIG.URL, {
         path: WS_CONFIG.PATH,
         auth: { token },
-        transports: ['websocket'],
+        transports: ['websocket', 'polling'], // 允许降级到 polling
         reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        reconnectionAttempts: 10,
+        reconnectionDelay: 1000, // 初始重连延迟 1 秒
+        reconnectionDelayMax: 10000, // 最大重连延迟 10 秒
+        reconnectionAttempts: 20, // 重连次数 20 次
+        randomizationFactor: 0.5, // 重连延迟随机因子，避免雪崩
+        perMessageDeflate: {
+          threshold: 1024, // 小于 1KB 不压缩
+        },
       });
 
       this.socket.on('connect', () => {
@@ -127,6 +136,10 @@ class WebSocketServiceClass {
     this.socket.on('message_sent', (data: WebSocketMessageData) => {
       logger.info('WebSocketService', '📤 Received message_sent event:', JSON.stringify(data));
       this.emit('message_sent', data);
+      // 通知消息发送成功
+      if (data.msgId) {
+        this.notifyMessageSent(data.msgId);
+      }
     });
     this.socket.on('user_status_changed', (data: WebSocketUserStatusData) => this.emit('user_status_changed', data));
     this.socket.on('user_typing', (data: WebSocketTypingData) => this.emit('user_typing', data));
@@ -144,24 +157,66 @@ class WebSocketServiceClass {
     });
   }
 
-  sendMessage(conversationId: string, text: string, type = 'text', msgId?: string, chatType: 'direct' | 'group' = 'direct') {
+  /**
+   * 发送消息（带超时回调）
+   * @param conversationId 会话 ID
+   * @param text 消息文本
+   * @param type 消息类型
+   * @param msgId 消息 ID（用于去重和超时处理）
+   * @param chatType 聊天类型
+   * @param onSent 发送结果回调（true=成功，false=超时/失败）
+   */
+  sendMessage(
+    conversationId: string,
+    text: string,
+    type = 'text',
+    msgId: string | undefined,
+    chatType: 'direct' | 'group' = 'direct',
+    onSent?: (success: boolean) => void
+  ) {
     console.log('[WebSocket] sendMessage called:', { conversationId, text, type, msgId, chatType });
     console.log('[WebSocket] socket connected:', this.socket?.connected);
     console.log('[WebSocket] socket exists:', !!this.socket);
 
     if (!this.socket) {
       console.error('[WebSocket] socket is null, cannot send message');
+      onSent?.(false);
       return;
     }
 
     if (!this.socket.connected) {
       console.error('[WebSocket] socket not connected, cannot send message');
+      onSent?.(false);
       return;
     }
 
     // Backend expects targetId, not conversationId
     this.socket.emit('send_message', { targetId: conversationId, text, type, msgId, chatType });
     console.log('[WebSocket] Message emitted successfully');
+
+    // 设置超时处理
+    if (msgId && onSent) {
+      const timeout = setTimeout(() => {
+        console.warn('[WebSocket] Message send timeout:', msgId);
+        this.pendingSends.delete(msgId);
+        onSent(false);
+      }, SEND_TIMEOUT);
+
+      this.pendingSends.set(msgId, { timeout, callback: onSent });
+    }
+  }
+
+  /**
+   * 通知消息发送成功（由外部调用，传入 msgId）
+   */
+  notifyMessageSent(msgId: string) {
+    const pending = this.pendingSends.get(msgId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      this.pendingSends.delete(msgId);
+      pending.callback(true);
+      logger.info('WebSocketService', '✅ Message confirmed:', msgId);
+    }
   }
 
   joinChat(chatId: string) {
@@ -231,6 +286,12 @@ class WebSocketServiceClass {
 
   disconnect() {
     this.socket?.disconnect();
+    // 清理所有待处理的发送请求
+    this.pendingSends.forEach((pending, msgId) => {
+      clearTimeout(pending.timeout);
+      pending.callback(false);
+    });
+    this.pendingSends.clear();
     this.socket = null;
     // 注意：不清除 eventHandlers，因为监听器可能还需要
     // eventHandlers 会在下次 connect 时由 setupEventListeners 重新注册到新的 socket
