@@ -304,9 +304,7 @@ export class FriendRequestService {
    */
   async markAllAsRead(): Promise<void> {
     try {
-      await apiMarkAllFriendRequestsAsRead();
-
-      // 更新本地状态
+      // Backend doesn't have this endpoint, only update local DB
       if (this.database) {
         await this.database.write(async () => {
           const requests = await this.database!.collections
@@ -328,7 +326,8 @@ export class FriendRequestService {
         });
 
         // 通知未读计数变化（清零）
-        this.notifyUnreadCountChange(0);
+        const unreadCount = await this.getUnreadCount();
+        this.notifyUnreadCountChange(unreadCount);
       }
 
       logger.info('FriendRequestService', 'All friend requests marked as read');

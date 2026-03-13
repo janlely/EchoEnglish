@@ -158,27 +158,31 @@ export const removeGroupMember = async (groupId: string, memberId: string): Prom
  * 获取待处理的好友申请列表
  */
 export const getPendingFriendRequests = async (): Promise<FriendRequestResult> => {
-  const response = await ApiService.request<{ success: boolean; data: FriendRequestResult }>(
+  const response = await ApiService.request<{ success: boolean; data: { requests: FriendRequest[] } }>(
     '/api/friends/requests'
   );
-  return response.data!;
+  // Backend doesn't return unreadCount, calculate locally
+  return {
+    requests: response.data!.requests,
+    unreadCount: response.data!.requests.length, // All pending requests are considered unread from server perspective
+    newRequestCursor: undefined,
+  };
 };
 
 /**
- * 获取好友申请未读数量
+ * 获取好友申请未读数量（未使用，保留以备将来使用）
  */
 export const getFriendRequestUnreadCount = async (): Promise<number> => {
-  const response = await ApiService.request<{ success: boolean; data: { unreadCount: number } }>(
-    '/api/friend-requests/unread-count'
-  );
-  return response.data!.unreadCount;
+  // Backend doesn't have this endpoint, return 0
+  // Frontend calculates unread count locally based on is_read flag
+  return 0;
 };
 
 /**
  * 接受好友申请
  */
 export const acceptFriendRequest = async (requestId: string): Promise<void> => {
-  await ApiService.request(`/api/friend-requests/${requestId}/accept`, {
+  await ApiService.request(`/api/friends/requests/${requestId}/accept`, {
     method: 'POST',
   });
 };
@@ -187,25 +191,23 @@ export const acceptFriendRequest = async (requestId: string): Promise<void> => {
  * 拒绝好友申请
  */
 export const rejectFriendRequest = async (requestId: string): Promise<void> => {
-  await ApiService.request(`/api/friend-requests/${requestId}/reject`, {
+  await ApiService.request(`/api/friends/requests/${requestId}/reject`, {
     method: 'POST',
   });
 };
 
 /**
- * 标记好友申请为已读
+ * 标记好友申请为已读（仅更新本地，后端未实现此接口）
  */
 export const markFriendRequestAsRead = async (requestId: string): Promise<void> => {
-  await ApiService.request(`/api/friend-requests/${requestId}/read`, {
-    method: 'POST',
-  });
+  // Backend doesn't have this endpoint, only update local DB in FriendRequestService
+  return Promise.resolve();
 };
 
 /**
- * 标记所有好友申请为已读
+ * 标记所有好友申请为已读（仅更新本地，后端未实现此接口）
  */
 export const markAllFriendRequestsAsRead = async (): Promise<void> => {
-  await ApiService.request('/api/friend-requests/read-all', {
-    method: 'POST',
-  });
+  // Backend doesn't have this endpoint, only update local DB in FriendRequestService
+  return Promise.resolve();
 };

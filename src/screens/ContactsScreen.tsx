@@ -377,23 +377,11 @@ const ContactsScreen = () => {
           text: '确定',
           onPress: async () => {
             try {
-              const token = await getAuthToken();
-              const response = await fetch(`${API_CONFIG.BASE_URL}/api/friends/requests/${requestId}/accept`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-              });
-
-              const data: any = await response.json();
-              if (response.ok && data.success) {
-                Alert.alert('成功', '已添加为好友');
-                fetchFriendRequests();
-                contactSyncService.syncContacts().then(loadContacts);
-              } else {
-                Alert.alert('失败', data.error || '请稍后重试');
-              }
+              // Use friendRequestService to properly sync with local database
+              await friendRequestService.acceptFriendRequest(requestId);
+              Alert.alert('成功', '已添加为好友');
+              fetchFriendRequests();
+              contactSyncService.syncContacts().then(loadContacts);
             } catch (error: any) {
               Alert.alert('失败', error.message || '请稍后重试');
             }
@@ -420,21 +408,9 @@ const ContactsScreen = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const token = await getAuthToken();
-              const response = await fetch(`${API_CONFIG.BASE_URL}/api/friends/requests/${requestId}/reject`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-              });
-
-              const data: any = await response.json();
-              if (response.ok && data.success) {
-                fetchFriendRequests();
-              } else {
-                Alert.alert('失败', data.error || '请稍后重试');
-              }
+              // Use friendRequestService to properly sync with local database
+              await friendRequestService.rejectFriendRequest(requestId);
+              fetchFriendRequests();
             } catch (error: any) {
               Alert.alert('失败', error.message || '请稍后重试');
             }
