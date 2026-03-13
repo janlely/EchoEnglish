@@ -10,7 +10,7 @@ generator client {
 // SQLite: DATABASE_URL="file:./dev.db"
 // PostgreSQL: DATABASE_URL="postgresql://user:password@localhost:5432/echoenglish"
 datasource db {
-  provider = "sqlite"
+  provider = env("DATABASE_PROVIDER") 
   url      = env("DATABASE_URL")
 }
 
