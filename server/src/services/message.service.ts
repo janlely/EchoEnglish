@@ -52,8 +52,10 @@ class MessageService {
         }
       }
 
-      // 根据聊天类型进行权限检查
-      if (chatType === 'group') {
+      // 根据聊天类型进行权限检查（基于 conversationId 格式判断，不依赖前端传入的 chatType）
+      const isGroup = isGroupConversation(conversationId);
+
+      if (isGroup) {
         // 群聊：检查用户是否是群成员
         const groupId = conversationId.replace('group_', '');
         const participant = await prisma.groupMember.findFirst({
@@ -152,7 +154,9 @@ class MessageService {
       );
 
       // Increment unread count for the other participant(s)
-      if (chatType === 'direct') {
+      const isGroup = isGroupConversation(conversationId);
+
+      if (!isGroup) {
         const otherUserId = getOtherUserIdFromConversationId(conversationId, senderId);
         if (otherUserId) {
           await conversationService.incrementUnreadCount(otherUserId, conversationId);
@@ -206,8 +210,10 @@ class MessageService {
     try {
       const { page = 1, limit = 50, sortBy = 'createdAt', sortOrder = 'desc' } = params;
 
-      // 根据聊天类型进行权限检查
-      if (chatType === 'group') {
+      // 根据聊天类型进行权限检查（基于 conversationId 格式判断，不依赖前端传入的 chatType）
+      const isGroup = isGroupConversation(conversationId);
+
+      if (isGroup) {
         const groupId = conversationId.replace('group_', '');
         const participant = await prisma.groupMember.findFirst({
           where: {
@@ -322,8 +328,10 @@ class MessageService {
     chatType: 'direct' | 'group' = 'direct'
   ) {
     try {
-      // 根据聊天类型进行权限检查
-      if (chatType === 'group') {
+      // 根据聊天类型进行权限检查（基于 conversationId 格式判断，不依赖前端传入的 chatType）
+      const isGroup = isGroupConversation(conversationId);
+
+      if (isGroup) {
         const groupId = conversationId.replace('group_', '');
         const participant = await prisma.groupMember.findFirst({
           where: {
