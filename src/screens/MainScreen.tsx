@@ -21,6 +21,7 @@ import logger from '../utils/logger';
 import BubbleMenu from '../components/BubbleMenu';
 import ConversationActionMenu, { ConversationMenuAction } from '../components/ConversationActionMenu';
 import { messageService } from '../services/MessageService';
+import WebSocketService from '../services/WebSocketService';
 
 // Define TypeScript interfaces
 interface ChatSessionInterface {
@@ -502,6 +503,24 @@ const MainScreen = () => {
             style: 'destructive',
             onPress: async () => {
               try {
+                // Step 1: 调用 markRead 清除后端的 unreadCount（失败不影响本地删除）
+                const session = chatSessions.find(s => s.conversationId === selectedConversationId);
+                if (session && session.unreadCount > 0) {
+                  try {
+                    // 使用 WebSocket mark_read 事件清除后端未读状态
+                    WebSocketService.markRead(
+                      selectedConversationId,
+                      selectedConversationId,
+                      session.type
+                    );
+                    logger.info('MainScreen', 'Called markRead for conversation:', selectedConversationId);
+                  } catch (markReadError) {
+                    // markRead 失败不影响本地删除，记录日志即可
+                    logger.warn('MainScreen', 'Failed to call markRead (will still delete locally):', selectedConversationId, markReadError);
+                  }
+                }
+
+                // Step 2: 删除本地数据
                 await database.write(async () => {
                   // Delete all messages for this conversation
                   const messages = await database.collections
