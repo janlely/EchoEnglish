@@ -70,17 +70,27 @@ class GroupAvatarService {
    */
   private async downloadAvatar(url: string, userId: string): Promise<Buffer | null> {
     try {
+      logger.info('[GroupAvatarService] downloadAvatar: Starting for user:', userId, 'URL:', url);
+
       // Handle relative URLs
       const fullUrl = url.startsWith('http') ? url : `http://localhost:3000${url}`;
+      logger.info('[GroupAvatarService] downloadAvatar: Full URL:', fullUrl);
 
       const response = await fetch(fullUrl);
+      logger.info('[GroupAvatarService] downloadAvatar: Response status:', response.status, 'ok:', response.ok);
+
       if (!response.ok) {
-        throw new Error(`Failed to download avatar: ${response.status}`);
+        logger.error('[GroupAvatarService] downloadAvatar: HTTP error:', response.status, response.statusText);
+        throw new Error(`Failed to download avatar: ${response.status} ${response.statusText}`);
       }
 
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const arrayBuffer = await response.arrayBuffer();
+      logger.info('[GroupAvatarService] downloadAvatar: Received', arrayBuffer.byteLength, 'bytes');
+
+      const buffer = Buffer.from(arrayBuffer);
 
       // Resize and crop to square, ensuring it fills the allocated space
+      logger.info('[GroupAvatarService] downloadAvatar: Processing with sharp...');
       const processed = await sharp(buffer)
         .resize(this.avatarSize, this.avatarSize, {
           fit: 'cover', // Cover ensures the image fills the entire space
@@ -88,9 +98,16 @@ class GroupAvatarService {
         })
         .toBuffer();
 
+      logger.info('[GroupAvatarService] downloadAvatar: Processed to', processed.length, 'bytes');
       return processed;
     } catch (error: any) {
-      logger.error('[GroupAvatarService] Download avatar error:', error.message);
+      logger.error('[GroupAvatarService] downloadAvatar: Error:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        userId,
+        url,
+      });
       return null;
     }
   }
@@ -100,7 +117,11 @@ class GroupAvatarService {
    */
   async generateGroupAvatar(groupId: string): Promise<string | null> {
     try {
+      logger.info('[GroupAvatarService] === generateGroupAvatar START ===');
+      logger.info('[GroupAvatarService] Group ID:', groupId);
+
       // Get group members with their avatars (limit to 9)
+      logger.info('[GroupAvatarService] Fetching group members from DB...');
       const groupMembers = await prisma.groupMember.findMany({
         where: { groupId },
         include: {
@@ -116,6 +137,15 @@ class GroupAvatarService {
         orderBy: { joinedAt: 'asc' },
       });
 
+      logger.info('[GroupAvatarService] Fetched members:', groupMembers.length);
+      groupMembers.forEach((m, i) => {
+        logger.info(`[GroupAvatarService] Member ${i}:`, {
+          userId: m.user.id,
+          name: m.user.name,
+          avatarUrl: m.user.avatarUrl
+        });
+      });
+
       if (groupMembers.length === 0) {
         logger.warn('[GroupAvatarService] No members found for group:', groupId);
         return null;
@@ -125,41 +155,58 @@ class GroupAvatarService {
 
       // Download and process member avatars
       const avatarBuffers: { buffer: Buffer; position: AvatarPosition }[] = [];
-      
+
       const layout = this.getGridLayout(groupMembers.length);
+      logger.info('[GroupAvatarService] Grid layout:', {
+        cols: layout.cols,
+        rows: layout.rows,
+        outputWidth: layout.outputWidth,
+        outputHeight: layout.outputHeight
+      });
 
       for (let i = 0; i < groupMembers.length; i++) {
         const member = groupMembers[i];
         const position = layout.positions[i];
-        
+
+        logger.info('[GroupAvatarService] Processing member:', i, member.user.id);
+
         if (!member.user.avatarUrl) {
-          // Generate placeholder avatar for user without avatar
+          logger.info('[GroupAvatarService] No avatar URL for member:', member.user.id, 'generating placeholder');
           const placeholder = await this.generatePlaceholderAvatar(member.user.name);
           avatarBuffers.push({ buffer: placeholder, position });
+          logger.info('[GroupAvatarService] Placeholder generated for member:', member.user.id);
           continue;
         }
 
+        logger.info('[GroupAvatarService] Downloading avatar for member:', member.user.id, 'URL:', member.user.avatarUrl);
         const buffer = await this.downloadAvatar(member.user.avatarUrl, member.user.id);
         if (buffer) {
           avatarBuffers.push({ buffer, position });
+          logger.info('[GroupAvatarService] Avatar downloaded for member:', member.user.id);
         } else {
-          // Fallback to placeholder
+          logger.warn('[GroupAvatarService] Avatar download failed for member:', member.user.id, 'using placeholder');
           const placeholder = await this.generatePlaceholderAvatar(member.user.name);
           avatarBuffers.push({ buffer: placeholder, position });
+          logger.info('[GroupAvatarService] Placeholder generated for member:', member.user.id);
         }
       }
 
+      logger.info('[GroupAvatarService] All avatars processed, count:', avatarBuffers.length);
+
       // Create a white background canvas first with dynamic size
+      logger.info('[GroupAvatarService] Creating background canvas...');
       const backgroundCanvas = await sharp({
         create: {
           width: layout.outputWidth,
           height: layout.outputHeight,
-          channels: 3, // RGB (no alpha for white background)
+          channels: 3, // RGB (no alpha for Jpeg)
           background: { r: 255, g: 255, b: 255 }, // White background
         },
       })
       .png()
       .toBuffer();
+
+      logger.info('[GroupAvatarService] Background canvas created');
 
       // Create composite image
       const compositeInputs = avatarBuffers.map(({ buffer, position }) => ({
@@ -168,15 +215,21 @@ class GroupAvatarService {
         left: position.x,
       }));
 
+      logger.info('[GroupAvatarService] Compositing avatars...');
       // Composite all avatars onto the white background
       const result = await sharp(backgroundCanvas)
         .composite(compositeInputs)
         .png()
         .toBuffer();
 
+      logger.info('[GroupAvatarService] Composite completed, size:', result.length, 'bytes');
+
       // Save to file
       const avatarDir = path.join(__dirname, '../../uploads/avatars/groups');
+      logger.info('[GroupAvatarService] Avatar directory:', avatarDir);
+
       if (!fs.existsSync(avatarDir)) {
+        logger.info('[GroupAvatarService] Creating avatar directory...');
         fs.mkdirSync(avatarDir, { recursive: true });
       }
 
@@ -185,11 +238,14 @@ class GroupAvatarService {
       const filename = `group_${groupId}_${timestamp}_${randomSuffix}.png`;
       const filepath = path.join(avatarDir, filename);
 
+      logger.info('[GroupAvatarService] Saving avatar to:', filepath);
       fs.writeFileSync(filepath, result);
+      logger.info('[GroupAvatarService] Avatar saved successfully');
 
       const avatarUrl = `/uploads/avatars/groups/${filename}`;
 
       // Update group avatarUrl in database
+      logger.info('[GroupAvatarService] Updating group avatar in DB...');
       await prisma.group.update({
         where: { id: groupId },
         data: { avatarUrl },
@@ -198,11 +254,17 @@ class GroupAvatarService {
       logger.info('[GroupAvatarService] Group avatar generated:', avatarUrl);
 
       // Clean up old group avatars
+      logger.info('[GroupAvatarService] Cleaning up old avatars...');
       await this.cleanupOldAvatars(groupId, filename);
 
+      logger.info('[GroupAvatarService] === generateGroupAvatar END ===');
       return avatarUrl;
     } catch (error: any) {
-      logger.error('[GroupAvatarService] Generate group avatar error:', error.message);
+      logger.error('[GroupAvatarService] Generate group avatar error:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
       return null;
     }
   }
