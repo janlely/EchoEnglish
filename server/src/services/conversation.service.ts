@@ -6,6 +6,7 @@ import {
   isGroupConversation,
   getOtherUserIdFromConversationId,
 } from '../utils/conversationId';
+import { log } from 'console';
 
 interface ConversationInfo {
   conversationId: string;
@@ -418,6 +419,7 @@ class ConversationService {
     conversationId: string,
     lastReadSeq: number
   ) {
+    logger.info(`[ConversationService] updateUserReadStatus: userId=${userId}, conversationId=${conversationId}, lastReadSeq=${lastReadSeq}`);
     try {
       await prisma.userConversationState.upsert({
         where: {

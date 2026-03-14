@@ -6,8 +6,18 @@ import { config } from './config';
 import routes from './routes';
 import { errorMiddleware, notFoundMiddleware } from './middleware/error.middleware';
 import { rateLimiter } from './middleware/rateLimit.middleware';
+import logger from './utils/logger';
 
 const app = express();
+
+// 请求日志中间件
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    logger.info(`[HTTP] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`);
+  });
+  next();
+});
 
 // Security middleware
 app.use(helmet());

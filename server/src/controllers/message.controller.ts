@@ -180,7 +180,10 @@ class MessageController {
       const userId = req.user!.id; // Current user ID
       const { conversationId, minSeq } = req.body;
 
+      logger.info(`[MessageController] ackMessages: userId=${userId}, conversationId=${conversationId}, minSeq=${minSeq}`);
+
       if (!conversationId || minSeq === undefined) {
+        logger.warn('[MessageController] ackMessages: missing params', { conversationId, minSeq });
         res.status(400).json({
           success: false,
           error: 'conversationId and minSeq are required',
@@ -193,6 +196,8 @@ class MessageController {
         conversationId,
         parseInt(minSeq as string)
       );
+
+      logger.info('[MessageController] ackMessages: success', result);
 
       res.status(200).json({
         success: true,

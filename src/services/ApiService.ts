@@ -35,6 +35,7 @@ class ApiServiceClass {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${API_CONFIG.BASE_URL}${endpoint}`;
+    console.log('[ApiService] request: URL=', url, 'endpoint=', endpoint);
 
     // 获取 Token
     const { accessToken, refreshToken } = await this.getTokens();
@@ -45,12 +46,15 @@ class ApiServiceClass {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     };
 
+    console.log('[ApiService] fetch start:', url, 'method:', options.method || 'GET');
     const response = await fetch(url, {
       ...options,
       headers,
     });
+    console.log('[ApiService] fetch response:', url, 'status:', response.status, 'ok:', response.ok);
 
     const data = await response.json() as T;
+    console.log('[ApiService] response data:', endpoint, JSON.stringify(data).slice(0, 200));
 
     // 处理 401 - Token 过期
     if (response.status === 401 && !(options.headers as Record<string, string>)?.['_retry']) {
@@ -59,6 +63,7 @@ class ApiServiceClass {
 
     if (!response.ok) {
       const errorData = data as { error?: string };
+      console.error('[ApiService] request failed:', endpoint, 'error:', errorData?.error);
       throw new Error(errorData.error || 'Request failed');
     }
 

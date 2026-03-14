@@ -648,6 +648,7 @@ class MessageService {
 
       // Determine the starting seq
       // If afterSeq is provided, use it; otherwise get from UserConversationState
+      logger.info(`[MessageService] Sync query: conversationId=${conversationId}, afterSeq=${afterSeq || 'null'}, limit=${limit}`);
       let startSeq = afterSeq;
       if (!startSeq) {
         const state = await prisma.userConversationState.findUnique({

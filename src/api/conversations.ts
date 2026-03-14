@@ -70,3 +70,29 @@ export const updateReadStatus = async (
     body: JSON.stringify({ lastReadSeq }),
   });
 };
+
+/**
+ * 确认消息已读（清除未读计数）
+ */
+export const ackMessages = async (
+  conversationId: string,
+  minSeq: number
+): Promise<void> => {
+  console.log('[ackMessages] Start:', { conversationId, minSeq });
+  try {
+    const response = await ApiService.request<{ success: boolean }>(
+      '/api/chats/messages/ack',
+      {
+        method: 'POST',
+        body: JSON.stringify({ conversationId, minSeq }),
+      }
+    );
+    console.log('[ackMessages] Response:', response);
+    if (!response.success) {
+      throw new Error('Failed to ack messages');
+    }
+  } catch (error) {
+    console.error('[ackMessages] Error:', error, 'conversationId:', conversationId, 'minSeq:', minSeq);
+    throw error;
+  }
+};
