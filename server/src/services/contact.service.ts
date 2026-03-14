@@ -711,6 +711,55 @@ class ContactService {
       throw error;
     }
   }
+
+  /**
+   * 解散群聊（仅群主可操作）
+   */
+  async dissolveGroup(groupId: string, operatorId: string) {
+    try {
+      logger.info(`[ContactService] Dissolve group: ${groupId} by user ${operatorId}`);
+
+      // 检查操作者是否是群主
+      const operatorMember = await prisma.groupMember.findUnique({
+        where: {
+          groupId_userId: {
+            groupId,
+            userId: operatorId,
+          },
+        },
+        include: {
+          group: true,
+        },
+      });
+
+      if (!operatorMember) {
+        throw new Error('Access denied: You are not a member of this group');
+      }
+
+      if (operatorMember.role !== 'owner') {
+        throw new Error('Unauthorized: Only group owner can dissolve the group');
+      }
+
+      // 验证群组所有权
+      if (operatorMember.group.ownerId !== operatorId) {
+        throw new Error('Unauthorized: You are not the owner of this group');
+      }
+
+      // 删除群组成员（Cascade 会自动删除）
+      // 删除群组（Cascade 会自动删除 GroupMember 记录）
+      await prisma.group.delete({
+        where: {
+          id: groupId,
+        },
+      });
+
+      logger.info(`[ContactService] Group ${groupId} dissolved successfully`);
+      return { success: true, message: 'Group dissolved successfully' };
+    } catch (error: any) {
+      logger.error('[ContactService] Dissolve group error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new ContactService();

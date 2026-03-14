@@ -210,6 +210,27 @@ class ContactController {
       next(error);
     }
   }
+
+  /**
+   * 解散群聊
+   */
+  async dissolveGroup(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const { groupId } = req.params;
+
+      const result = await contactService.dissolveGroup(groupId, userId);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Group dissolved successfully',
+      });
+    } catch (error: any) {
+      logger.error('Dissolve group controller error:', error);
+      next(error);
+    }
+  }
 }
 
 export default new ContactController();

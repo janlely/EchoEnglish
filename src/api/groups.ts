@@ -122,3 +122,31 @@ export const updateGroupName = async (groupId: string, name: string): Promise<an
     return null;
   }
 };
+
+/**
+ * Delete (dissolve) a group
+ * @param groupId - The group ID to dissolve
+ */
+export const deleteGroup = async (groupId: string): Promise<any> => {
+  try {
+    const token = await getAuthToken();
+
+    const response = await fetch(`${API_CONFIG.BASE_URL}/api/contacts/groups/${groupId}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    const data: any = await response.json();
+
+    if (response.ok && data.success) {
+      return data;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[Groups API] Delete group error:', error);
+    return null;
+  }
+};

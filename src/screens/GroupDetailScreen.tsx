@@ -19,7 +19,7 @@ import { Group, GroupMember, Friend, Conversation } from '../database/models';
 import { GroupDetailScreenNavigationProp } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { getAvatarUrl } from '../utils/avatar';
-import { updateGroupName } from '../api/groups';
+import { updateGroupName, deleteGroup } from '../api/groups';
 import logger from '../utils/logger';
 
 const GroupDetailScreen = () => {
@@ -209,7 +209,7 @@ const GroupDetailScreen = () => {
   const isOwner = currentUserRole === 'owner';
 
   // Handle group disband
-  const handleDisbandGroup = () => {
+  const handleDisbandGroup = async () => {
     Alert.alert(
       '解散群聊',
       '确定要解散此群聊吗？此操作不可撤销。',
@@ -219,8 +219,79 @@ const GroupDetailScreen = () => {
           text: '确定',
           style: 'destructive',
           onPress: async () => {
-            // TODO: Implement group disband functionality
-            Alert.alert('功能开发中', '群解散功能正在开发中');
+            try {
+              if (!database) {
+                Alert.alert('错误', '数据库不可用');
+                return;
+              }
+
+              // 调用 API 解散群聊
+              const result = await deleteGroup(groupId);
+
+              if (!result || !result.success) {
+                throw new Error('解散群聊失败');
+              }
+
+              logger.info('GroupDetailScreen', 'Group dissolved successfully:', groupId);
+
+              // 删除本地数据库中的群组成员记录
+              await database.write(async () => {
+                const groupMembers = await database.collections
+                  .get<GroupMember>('group_members')
+                  .query(Q.where('group_id', Q.eq(groupId)))
+                  .fetch();
+
+                for (const member of groupMembers) {
+                  await member.destroyPermanently();
+                }
+
+                // 删除群组记录
+                const groups = await database.collections
+                  .get<Group>('groups')
+                  .query(Q.where('group_id', Q.eq(groupId)))
+                  .fetch();
+
+                for (const group of groups) {
+                  await group.destroyPermanently();
+                }
+
+                // 删除对应的会话记录
+                const conversationId = `group_${groupId}`;
+                const conversations = await database.collections
+                  .get<Conversation>('conversations')
+                  .query(Q.where('conversation_id', Q.eq(conversationId)))
+                  .fetch();
+
+                for (const conv of conversations) {
+                  await conv.destroyPermanently();
+                }
+
+                // 删除对应的消息记录
+                const messages = await database.collections
+                  .get('messages')
+                  .query(Q.where('conversation_id', Q.eq(conversationId)))
+                  .fetch();
+
+                for (const msg of messages) {
+                  await msg.destroyPermanently();
+                }
+              });
+
+              logger.info('GroupDetailScreen', 'Local group data cleaned up');
+
+              Alert.alert('成功', '群聊已解散', [
+                {
+                  text: '确定',
+                  onPress: () => {
+                    // 返回上一页
+                    navigation.goBack();
+                  },
+                },
+              ]);
+            } catch (error: any) {
+              logger.error('GroupDetailScreen', 'Dissolve group error:', error);
+              Alert.alert('错误', error.message || '解散群聊失败，请重试');
+            }
           },
         },
       ]
