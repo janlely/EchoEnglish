@@ -343,7 +343,7 @@ class MessageService {
    */
   private async syncFriendInfoIfMissing(userId: string) {
     try {
-      // 检查本地是否有好友信息
+      // 在事务内再次检查，防止竞态条件导致重复创建
       const friends = await this.database!.collections
         .get<Friend>('friends')
         .query(Q.where('friend_id', Q.eq(userId)))
@@ -351,6 +351,7 @@ class MessageService {
 
       if (friends.length > 0) {
         // 已有好友信息，无需同步
+        logger.debug('MessageService', 'Friend exists, skip sync:', userId);
         return;
       }
 
@@ -377,6 +378,17 @@ class MessageService {
 
       // 保存到 friends 表
       await this.database!.write(async () => {
+        // 在事务内再次检查（双重检查）
+        const friendsInTx = await this.database!.collections
+          .get<Friend>('friends')
+          .query(Q.where('friend_id', Q.eq(userId)))
+          .fetch();
+
+        if (friendsInTx.length > 0) {
+          logger.debug('MessageService', 'Friend created in transaction, skip:', userId);
+          return;
+        }
+
         await this.database!.collections.get<Friend>('friends').create((f: Friend) => {
           f.friendId = userData.id || userId;
           f.name = userData.name || 'Unknown';

@@ -109,6 +109,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
       const userInfo = await getUserInfo(userId);
 
       await database.write(async () => {
+        // 在事务内再次检查，防止竞态条件导致重复创建
         const existingFriends = await database.collections
           .get<Friend>('friends')
           .query(Q.where('friend_id', Q.eq(userId)))
@@ -154,6 +155,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
 
       await database.write(async () => {
         if (info.type === 'direct') {
+          // 在事务内再次检查，防止竞态条件导致重复创建
           const existingFriends = await database.collections
             .get<Friend>('friends')
             .query(Q.where('friend_id', Q.eq(info.targetId)))
@@ -176,6 +178,7 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
           }
           logger.debug('useChatSync', 'Friend info synced:', info.targetId);
         } else {
+          // 在事务内再次检查，防止竞态条件导致重复创建
           const existingGroups = await database.collections
             .get<Group>('groups')
             .query(Q.where('group_id', Q.eq(info.targetId)))

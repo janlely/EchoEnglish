@@ -28,7 +28,7 @@ export const schema = appSchema({
     tableSchema({
       name: 'friends',
       columns: [
-        { name: 'friend_id', type: 'string' },      // 好友用户 ID (主键)
+        { name: 'friend_id', type: 'string', isIndexed: true },      // 好友用户 ID (主键)
         { name: 'name', type: 'string' },           // 好友名称
         { name: 'email', type: 'string', isOptional: true },
         { name: 'avatar_url', type: 'string', isOptional: true },
