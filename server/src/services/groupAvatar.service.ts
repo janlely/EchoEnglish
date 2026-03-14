@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
+import fetch from 'node-fetch';
 import prisma from '../config/database';
 import logger from '../utils/logger';
 
