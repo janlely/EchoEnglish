@@ -1,7 +1,6 @@
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
-import fetch from 'node-fetch';
 import prisma from '../config/database';
 import logger from '../utils/logger';
 
@@ -66,47 +65,45 @@ class GroupAvatarService {
   }
 
   /**
-   * Download and save avatar from URL
+   * Read avatar from local file system
    */
-  private async downloadAvatar(url: string, userId: string): Promise<Buffer | null> {
+  private async readLocalAvatar(avatarUrl: string, userId: string): Promise<Buffer | null> {
     try {
-      logger.info('[GroupAvatarService] downloadAvatar: Starting for user:', userId, 'URL:', url);
+      logger.info('[GroupAvatarService] readLocalAvatar: Starting for user:', userId, 'avatarUrl:', avatarUrl);
 
-      // Handle relative URLs
-      const fullUrl = url.startsWith('http') ? url : `http://localhost:3000${url}`;
-      logger.info('[GroupAvatarService] downloadAvatar: Full URL:', fullUrl);
+      // avatarUrl is like: /uploads/avatars/xxx.jpg
+      // Convert to absolute path
+      const absolutePath = path.join(__dirname, '../../', avatarUrl);
+      logger.info('[GroupAvatarService] readLocalAvatar: Absolute path:', absolutePath);
 
-      const response = await fetch(fullUrl);
-      logger.info('[GroupAvatarService] downloadAvatar: Response status:', response.status, 'ok:', response.ok);
-
-      if (!response.ok) {
-        logger.error('[GroupAvatarService] downloadAvatar: HTTP error:', response.status, response.statusText);
-        throw new Error(`Failed to download avatar: ${response.status} ${response.statusText}`);
+      // Check if file exists
+      if (!fs.existsSync(absolutePath)) {
+        logger.warn('[GroupAvatarService] readLocalAvatar: File not exists:', absolutePath);
+        return null;
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-      logger.info('[GroupAvatarService] downloadAvatar: Received', arrayBuffer.byteLength, 'bytes');
-
-      const buffer = Buffer.from(arrayBuffer);
+      // Read file
+      const buffer = fs.readFileSync(absolutePath);
+      logger.info('[GroupAvatarService] readLocalAvatar: Read', buffer.length, 'bytes');
 
       // Resize and crop to square, ensuring it fills the allocated space
-      logger.info('[GroupAvatarService] downloadAvatar: Processing with sharp...');
+      logger.info('[GroupAvatarService] readLocalAvatar: Processing with sharp...');
       const processed = await sharp(buffer)
         .resize(this.avatarSize, this.avatarSize, {
-          fit: 'cover', // Cover ensures the image fills the entire space
+          fit: 'cover',
           position: 'center',
         })
         .toBuffer();
 
-      logger.info('[GroupAvatarService] downloadAvatar: Processed to', processed.length, 'bytes');
+      logger.info('[GroupAvatarService] readLocalAvatar: Processed to', processed.length, 'bytes');
       return processed;
     } catch (error: any) {
-      logger.error('[GroupAvatarService] downloadAvatar: Error:', {
+      logger.error('[GroupAvatarService] readLocalAvatar: Error:', {
         message: error.message,
         stack: error.stack,
         name: error.name,
         userId,
-        url,
+        avatarUrl,
       });
       return null;
     }
@@ -178,8 +175,8 @@ class GroupAvatarService {
           continue;
         }
 
-        logger.info('[GroupAvatarService] Downloading avatar for member:', member.user.id, 'URL:', member.user.avatarUrl);
-        const buffer = await this.downloadAvatar(member.user.avatarUrl, member.user.id);
+        logger.info('[GroupAvatarService] Reading local avatar for member:', member.user.id, 'URL:', member.user.avatarUrl);
+        const buffer = await this.readLocalAvatar(member.user.avatarUrl, member.user.id);
         if (buffer) {
           avatarBuffers.push({ buffer, position });
           logger.info('[GroupAvatarService] Avatar downloaded for member:', member.user.id);
