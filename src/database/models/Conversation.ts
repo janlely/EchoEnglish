@@ -19,6 +19,9 @@ export default class Conversation extends Model {
   @field('last_read_seq')
   lastReadSeq?: number; // Last read message seq
 
+  @field('last_acked_seq')
+  lastAckedSeq?: number; // Last acked message seq (for delete check)
+
   @field('latest_summary')
   latestSummary?: string;
 

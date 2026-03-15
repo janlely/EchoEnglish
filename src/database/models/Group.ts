@@ -19,6 +19,9 @@ export default class Group extends Model {
   @field('member_ids')
   memberIds!: string; // JSON string of member IDs
 
+  @field('status')
+  status!: string; // 'active' | 'dissolved'
+
   @date('created_at')
   createdAt!: number;
 

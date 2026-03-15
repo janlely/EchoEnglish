@@ -12,14 +12,17 @@ export interface MessageInterface {
   timestamp: string;
   sending?: boolean;
   failed?: boolean;
+  seq?: number;
 }
 
 export interface SelectedMessage {
   id: string;
   msgId: string;
   text: string;
+  seq?: number;
+  senderId?: string;
 }
 
 export type ChatType = 'direct' | 'group';
 
-export type MenuAction = 'translate' | 'copy';
+export type MenuAction = 'translate' | 'copy' | 'delete';

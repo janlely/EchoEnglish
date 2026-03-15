@@ -1,12 +1,13 @@
 /**
  * useChatSync - 聊天数据同步逻辑
- * 
+ *
  * 负责：
  * - 同步群组成员信息
  * - 同步用户信息
  * - 同步会话信息
  * - 同步消息从服务器
  * - 消息确认 (ACK)
+ * - lastAckedSeq 管理
  */
 
 import { useCallback } from 'react';
@@ -19,6 +20,7 @@ import { getAuthToken } from '../../../services/ApiService';
 import { getConversationInfo } from '../../../api/conversations';
 import { getUserInfo, getUsersBatch } from '../../../api/user';
 import logger from '../../../utils/logger';
+import { ErrorCode, isGroupDissolvedError } from '../../../constants/errorCodes';
 
 interface UseChatSyncParams {
   database: Database | null;
@@ -28,6 +30,27 @@ interface UseChatSyncParams {
 }
 
 export const useChatSync = ({ database, conversationId, chatId, chatType }: UseChatSyncParams) => {
+  /**
+   * 获取本地 lastAckedSeq
+   */
+  const getLocalLastAckedSeq = useCallback(async (): Promise<number | undefined> => {
+    if (!database) return undefined;
+
+    try {
+      const conversations = await database.collections
+        .get<Conversation>('conversations')
+        .query(Q.where('conversation_id', Q.eq(conversationId)))
+        .fetch();
+
+      if (conversations.length > 0) {
+        return conversations[0].lastAckedSeq;
+      }
+      return undefined;
+    } catch (error) {
+      logger.error('useChatSync', 'Get local lastAckedSeq error:', error);
+      return undefined;
+    }
+  }, [database, conversationId]);
   /**
    * 获取本地最新 seq
    */
@@ -204,10 +227,36 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
           logger.debug('useChatSync', 'Group info synced:', info.targetId);
         }
       });
-    } catch (error) {
-      logger.error('useChatSync', 'Sync conversation info error:', error);
+    } catch (error: any) {
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const errorCode = error?.code;
+      if (isGroupDissolvedError(errorCode)) {
+        logger.info('useChatSync', 'Sync conversation info error:', error.message, 'code:', errorCode);
+
+        // 更新本地群状态为已解散
+        if (database && chatType === 'group') {
+          database.write(async () => {
+            const groupRecords = await database.collections
+              .get<Group>('groups')
+              .query(Q.where('group_id', Q.eq(chatId)))
+              .fetch();
+
+            if (groupRecords.length > 0) {
+              await groupRecords[0].update((g: Group) => {
+                g.status = 'dissolved';
+                g.updatedAt = Date.now();
+              });
+              logger.info('useChatSync', 'Group status updated to dissolved');
+            }
+          }).catch(err => {
+            logger.error('useChatSync', 'Error updating group status:', err);
+          });
+        }
+      } else {
+        logger.error('useChatSync', 'Sync conversation info error:', error);
+      }
     }
-  }, [database, conversationId]);
+  }, [database, conversationId, chatId, chatType]);
 
   /**
    * 消息确认（ACK）
@@ -245,6 +294,108 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
       logger.error('useChatSync', 'Ack error:', error.message);
     }
   }, [conversationId]);
+
+  /**
+   * 计算可以更新到的最大连续 seq
+   * 从 lastAckedSeq + 1 开始，找到连续的 seq 链
+   *
+   * 例如：lastAckedSeq = 100，本地消息有 101, 102, 103, 104, 106
+   * 返回 104（因为 104 和 106 之间有 gap）
+   */
+  const calculateMaxContinuousSeq = useCallback(async (currentLastAckedSeq: number | undefined): Promise<number> => {
+    if (!database) return currentLastAckedSeq ?? 0;
+
+    try {
+      const startSeq = (currentLastAckedSeq ?? 0) + 1;
+
+      // 只获取 seq >= startSeq 的消息，按 seq 升序排列
+      const messages = await database.collections
+        .get<Message>('messages')
+        .query(
+          Q.where('conversation_id', Q.eq(conversationId)),
+          Q.where('seq', Q.gte(startSeq)),
+          Q.sortBy('seq', Q.asc)
+        )
+        .fetch();
+
+      if (messages.length === 0) {
+        return currentLastAckedSeq ?? 0;
+      }
+
+      // 从 startSeq 开始找连续的 seq
+      let expectedSeq = startSeq;
+      let maxContinuousSeq = currentLastAckedSeq ?? 0;
+
+      for (const msg of messages) {
+        if (msg.seq === undefined) continue;
+
+        if (msg.seq === expectedSeq) {
+          // 连续，更新
+          maxContinuousSeq = msg.seq;
+          expectedSeq++;
+        } else if (msg.seq > expectedSeq) {
+          // 有 gap，停止
+          break;
+        }
+        // msg.seq < expectedSeq 的情况（重复/乱序消息），跳过
+      }
+
+      logger.info('useChatSync', `calculateMaxContinuousSeq: current=${currentLastAckedSeq}, max=${maxContinuousSeq}`);
+      return maxContinuousSeq;
+    } catch (error) {
+      logger.error('useChatSync', 'Calculate max continuous seq error:', error);
+      return currentLastAckedSeq ?? 0;
+    }
+  }, [database, conversationId]);
+
+  /**
+   * 更新 lastAckedSeq 到最大连续值
+   * 只在删除消息时调用
+   */
+  const updateLastAckedSeqToMax = useCallback(async (): Promise<number> => {
+    if (!database) return 0;
+
+    try {
+      const currentLastAckedSeq = await getLocalLastAckedSeq();
+      const maxContinuousSeq = await calculateMaxContinuousSeq(currentLastAckedSeq);
+
+      if (maxContinuousSeq === currentLastAckedSeq) {
+        logger.debug('useChatSync', 'lastAckedSeq already at max, no update needed');
+        return maxContinuousSeq;
+      }
+
+      // 更新 lastAckedSeq
+      await database.write(async () => {
+        const conversations = await database.collections
+          .get<Conversation>('conversations')
+          .query(Q.where('conversation_id', Q.eq(conversationId)))
+          .fetch();
+
+        if (conversations.length > 0) {
+          await conversations[0].update((c: Conversation) => {
+            c.lastAckedSeq = maxContinuousSeq;
+            c.updatedAt = Date.now();
+          });
+        } else {
+          await database.collections.get<Conversation>('conversations').create((c: Conversation) => {
+            c.conversationId = conversationId;
+            c.type = chatType;
+            c.targetId = chatId;
+            c.lastAckedSeq = maxContinuousSeq;
+            c.unreadCount = 0;
+            c.createdAt = Date.now();
+            c.updatedAt = Date.now();
+          });
+        }
+      });
+
+      logger.info('useChatSync', `lastAckedSeq updated to ${maxContinuousSeq}`);
+      return maxContinuousSeq;
+    } catch (error: any) {
+      logger.error('useChatSync', 'Update lastAckedSeq to max error:', error.message);
+      return 0;
+    }
+  }, [database, conversationId, chatType, chatId, getLocalLastAckedSeq, calculateMaxContinuousSeq]);
 
   /**
    * 从服务器同步消息
@@ -306,7 +457,34 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
         const data: any = await response.json();
 
         if (!response.ok || !data.success) {
-          logger.error('useChatSync', 'Failed to fetch messages:', data.error);
+          // 业务错误使用 info 级别，其他错误使用 error 级别
+          // error code is at data.code, not data.error.code
+          const errorCode = data.code;
+          if (isGroupDissolvedError(errorCode)) {
+            logger.info('useChatSync', 'Failed to fetch messages:', data.error, 'code:', errorCode);
+
+            // 更新本地群状态为已解散
+            if (database && chatType === 'group') {
+              database.write(async () => {
+                const groupRecords = await database.collections
+                  .get<Group>('groups')
+                  .query(Q.where('group_id', Q.eq(chatId)))
+                  .fetch();
+
+                if (groupRecords.length > 0 && groupRecords[0].status !== 'dissolved') {
+                  await groupRecords[0].update((g: Group) => {
+                    g.status = 'dissolved';
+                    g.updatedAt = Date.now();
+                  });
+                  logger.info('useChatSync', 'Group status updated to dissolved from sync messages');
+                }
+              }).catch(err => {
+                logger.error('useChatSync', 'Error updating group status:', err);
+              });
+            }
+          } else {
+            logger.error('useChatSync', 'Failed to fetch messages:', data.error);
+          }
           hasMore = false;
           continue;
         }
@@ -410,5 +588,8 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
     syncConversationInfo,
     syncMessagesFromServer,
     ackMessages,
+    getLocalLastAckedSeq,
+    calculateMaxContinuousSeq,
+    updateLastAckedSeqToMax,
   };
 };

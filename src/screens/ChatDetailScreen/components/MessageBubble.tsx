@@ -107,7 +107,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </Text>
         </View>
         {sending && <Text style={[styles.messageStatus, { color: colors.textTertiary }]}>发送中...</Text>}
-        {failed && <Text style={[styles.failedStatus, { color: colors.error }]}>点击重试</Text>}
       </View>
 
       {/* Avatar for my messages */}
@@ -176,10 +175,6 @@ const styles = StyleSheet.create({
   messageStatus: {
     fontSize: 10,
     marginTop: 4,
-  },
-  failedStatus: {
-    fontSize: 10,
-    marginLeft: 5,
   },
 });
 

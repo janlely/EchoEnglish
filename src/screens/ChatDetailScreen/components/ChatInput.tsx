@@ -1,6 +1,6 @@
 /**
  * ChatInput - 输入框组件
- * 
+ *
  * 负责：
  * - 消息输入框
  * - 发送按钮
@@ -17,6 +17,7 @@ interface ChatInputProps {
   onSend: () => void;
   onLongPress: () => void;
   onKeyboardFocus: () => void;
+  disabled?: boolean;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -25,23 +26,27 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   onLongPress,
   onKeyboardFocus,
+  disabled = false,
 }) => {
   return (
     <View style={styles.inputContainer}>
       <TextInput
-        style={styles.textInput}
-        placeholder="输入消息..."
+        style={[styles.textInput, disabled && styles.textInputDisabled]}
+        placeholder={disabled ? '群已解散，无法发送消息' : '输入消息...'}
+        placeholderTextColor={disabled ? '#999' : '#ccc'}
         multiline
         value={inputText}
         onChangeText={onTextChange}
         blurOnSubmit={false}
         onFocus={onKeyboardFocus}
+        editable={!disabled}
       />
       <TouchableOpacity
-        style={styles.sendButton}
+        style={[styles.sendButton, disabled && styles.sendButtonDisabled]}
         onPress={onSend}
         onLongPress={onLongPress}
         delayLongPress={500}
+        disabled={disabled}
       >
         <Text style={styles.sendButtonText}>发送</Text>
       </TouchableOpacity>
@@ -67,11 +72,18 @@ const styles = StyleSheet.create({
     marginRight: 10,
     fontSize: 16,
   },
+  textInputDisabled: {
+    backgroundColor: '#f0f0f0',
+    color: '#999',
+  },
   sendButton: {
     backgroundColor: '#007AFF',
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderRadius: 20,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#ccc',
   },
   sendButtonText: {
     color: '#ffffff',

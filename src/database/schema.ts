@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 11, // Reverted: removed latest_msg_id from conversations table
+  version: 13, // Added last_acked_seq to conversations table
   tables: [
     // ===== User tables =====
 
@@ -47,6 +47,7 @@ export const schema = appSchema({
         { name: 'avatar_url', type: 'string', isOptional: true },
         { name: 'owner_id', type: 'string' },
         { name: 'member_ids', type: 'string' },     // JSON 字符串，成员 ID 列表
+        { name: 'status', type: 'string', isOptional: true },  // 'active' | 'dissolved'
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -107,6 +108,7 @@ export const schema = appSchema({
         { name: 'latest_sender_id', type: 'string', isOptional: true },
         { name: 'latest_timestamp', type: 'number', isOptional: true },
         { name: 'last_read_seq', type: 'number', isOptional: true },  // Last read seq
+        { name: 'last_acked_seq', type: 'number', isOptional: true }, // Last acked seq (for delete check)
         { name: 'unread_count', type: 'number', isOptional: true },
         { name: 'is_pinned', type: 'boolean' },
         { name: 'created_at', type: 'number' },

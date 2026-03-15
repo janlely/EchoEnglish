@@ -2,18 +2,20 @@ import { io, Socket } from 'socket.io-client';
 import { WS_CONFIG } from '../config/constants';
 import { TokenStorage } from './TokenStorage';
 import logger from '../utils/logger';
-import {
-  WebSocketMessageData,
-  WebSocketUserStatusData,
-  WebSocketTypingData,
-  WebSocketMessagesReadData,
-  WebSocketNotificationData,
-} from '../types/websocket';
+import { EventBus } from '../events/EventBus';
+import { ErrorCode } from '../constants/errorCodes';
 
 // 发送超时配置
 const SEND_TIMEOUT = 10000; // 10 秒
 
-// Simple cross-platform event emitter
+// WebSocket 错误事件类型
+export interface WebSocketError {
+  code: string;
+  message: string;
+  msgId?: string;
+}
+
+// Simple cross-platform event emitter for auth events only
 type AuthEventHandler = () => void;
 
 class SimpleEventEmitter {
@@ -38,14 +40,10 @@ class SimpleEventEmitter {
 // Create event emitter for auth events
 export const authEventEmitter = new SimpleEventEmitter();
 
-// Type-safe event handler
-type WebSocketEventHandler<T = unknown> = (data: T) => void;
-
 class WebSocketServiceClass {
   private socket: Socket | null = null;
-  private eventHandlers = new Map<string, Set<WebSocketEventHandler>>();
   // 消息发送超时管理：msgId -> { timeout, callback }
-  private pendingSends = new Map<string, { timeout: ReturnType<typeof setTimeout>; callback: (success: boolean) => void }>();
+  private pendingSends = new Map<string, { timeout: ReturnType<typeof setTimeout>; callback: (success: boolean, error?: string, errorCode?: string) => void }>();
 
   // 连接 WebSocket
   async connect() {
@@ -129,29 +127,68 @@ class WebSocketServiceClass {
       logger.info('WebSocketService', 'Socket connected, ID:', this.socket?.id);
     });
 
-    this.socket.on('receive_message', (data: WebSocketMessageData) => {
-      logger.info('WebSocketService', '🔔 Received receive_message event from server:', JSON.stringify(data));
-      this.emit('receive_message', data);
+    // 接收消息 -> 通过 EventBus 广播
+    this.socket.on('receive_message', (data: any) => {
+      logger.info('WebSocketService', '🔔 Received receive_message event from server');
+      EventBus.emit('ws:message', data);
     });
-    this.socket.on('message_sent', (data: WebSocketMessageData) => {
+
+    // 消息发送成功 -> 通知 pendingSends 并广播
+    this.socket.on('message_sent', (data: { msgId?: string; messageId?: string; status?: string }) => {
       logger.info('WebSocketService', '📤 Received message_sent event:', JSON.stringify(data));
-      this.emit('message_sent', data);
+      EventBus.emit('ws:message_sent', data);
       // 通知消息发送成功
       if (data.msgId) {
         this.notifyMessageSent(data.msgId);
       }
     });
-    this.socket.on('user_status_changed', (data: WebSocketUserStatusData) => this.emit('user_status_changed', data));
-    this.socket.on('user_typing', (data: WebSocketTypingData) => this.emit('user_typing', data));
-    this.socket.on('user_stopped_typing', (data: WebSocketTypingData) => this.emit('user_stopped_typing', data));
-    this.socket.on('messages_read', (data: WebSocketMessagesReadData) => this.emit('messages_read', data));
-    this.socket.on('new_notification', (data: WebSocketNotificationData) => this.emit('new_notification', data));
-    this.socket.on('assistant_response_chunk', (data: any) => this.emit('assistant_response_chunk', data));
-    this.socket.on('translate_message_response', (data: any) => {
-      logger.info('WebSocketService', 'Received translate_message_response:', JSON.stringify(data));
-      this.emit('translate_message_response', data);
+
+    // 发送错误 -> 通知 pendingSends 并广播
+    this.socket.on('error', (error: WebSocketError) => {
+      logger.info('WebSocketService', '📛 Received error event:', error);
+      // 通知消息发送失败
+      if (error.msgId) {
+        this.notifyMessageFailed(error.msgId, error.message, error.code);
+      }
+      // 广播错误事件
+      EventBus.emit('ws:send_error', error);
     });
-    this.socket.on('error', (error: Error) => logger.error('WebSocketService', 'Socket error:', error.message));
+
+    // 用户状态变更
+    this.socket.on('user_status_changed', (data: any) => {
+      EventBus.emit('ws:user_status', data);
+    });
+
+    // 输入状态
+    this.socket.on('user_typing', (data: any) => {
+      EventBus.emit('ws:typing', data);
+    });
+
+    this.socket.on('user_stopped_typing', (data: any) => {
+      EventBus.emit('ws:typing', data);
+    });
+
+    // 消息已读
+    this.socket.on('messages_read', (data: any) => {
+      EventBus.emit('ws:messages_read', data);
+    });
+
+    // 通知
+    this.socket.on('new_notification', (data: any) => {
+      EventBus.emit('ws:notification', data);
+    });
+
+    // AI 助手响应
+    this.socket.on('assistant_response_chunk', (data: any) => {
+      EventBus.emit('ws:assistant_chunk', data);
+    });
+
+    // 翻译响应
+    this.socket.on('translate_message_response', (data: any) => {
+      logger.info('WebSocketService', 'Received translate_message_response');
+      EventBus.emit('ws:translate_response', data);
+    });
+
     this.socket.on('disconnect', (reason: string) => {
       logger.info('WebSocketService', '⚠️ Socket disconnected, reason:', reason);
     });
@@ -164,7 +201,7 @@ class WebSocketServiceClass {
    * @param type 消息类型
    * @param msgId 消息 ID（用于去重和超时处理）
    * @param chatType 聊天类型
-   * @param onSent 发送结果回调（true=成功，false=超时/失败）
+   * @param onSent 发送结果回调（true=成功，false=超时/失败，error=错误信息，errorCode=错误码）
    */
   sendMessage(
     conversationId: string,
@@ -172,110 +209,120 @@ class WebSocketServiceClass {
     type = 'text',
     msgId: string | undefined,
     chatType: 'direct' | 'group' = 'direct',
-    onSent?: (success: boolean) => void
+    onSent?: (success: boolean, error?: string, errorCode?: string) => void
   ) {
-    console.log('[WebSocket] sendMessage called:', { conversationId, text, type, msgId, chatType });
-    console.log('[WebSocket] socket connected:', this.socket?.connected);
-    console.log('[WebSocket] socket exists:', !!this.socket);
+    logger.info('WebSocketService', 'sendMessage called:', { conversationId, msgId, chatType });
 
     if (!this.socket) {
-      console.error('[WebSocket] socket is null, cannot send message');
+      logger.error('WebSocketService', 'socket is null, cannot send message');
       onSent?.(false);
       return;
     }
 
     if (!this.socket.connected) {
-      console.error('[WebSocket] socket not connected, cannot send message');
+      logger.error('WebSocketService', 'socket not connected, cannot send message');
       onSent?.(false);
       return;
     }
 
     // Backend expects targetId, not conversationId
     this.socket.emit('send_message', { targetId: conversationId, text, type, msgId, chatType });
-    console.log('[WebSocket] Message emitted successfully');
+    logger.info('WebSocketService', 'Message emitted to server');
 
-    // 设置超时处理
+    // 设置超时处理和回调
     if (msgId && onSent) {
       const timeout = setTimeout(() => {
-        console.warn('[WebSocket] Message send timeout:', msgId);
+        logger.warn('WebSocketService', 'Message send timeout:', msgId);
         this.pendingSends.delete(msgId);
         onSent(false);
       }, SEND_TIMEOUT);
 
       this.pendingSends.set(msgId, { timeout, callback: onSent });
+      logger.info('WebSocketService', '📌 Pending send added, msgId:', msgId, 'total pending:', this.pendingSends.size);
+    } else {
+      logger.warn('WebSocketService', '⚠️ No msgId or onSent callback, msgId:', msgId, 'onSent:', !!onSent);
     }
   }
 
   /**
-   * 通知消息发送成功（由外部调用，传入 msgId）
+   * 通知消息发送成功（内部方法，收到 message_sent 时调用）
    */
-  notifyMessageSent(msgId: string) {
+  private notifyMessageSent(msgId: string) {
     const pending = this.pendingSends.get(msgId);
     if (pending) {
       clearTimeout(pending.timeout);
       this.pendingSends.delete(msgId);
       pending.callback(true);
       logger.info('WebSocketService', '✅ Message confirmed:', msgId);
+    } else {
+      logger.warn('WebSocketService', '⚠️ No pending send for msgId:', msgId);
     }
   }
 
+  /**
+   * 通知消息发送失败（内部方法，收到 error 时调用）
+   */
+  private notifyMessageFailed(msgId: string, errorMessage: string, errorCode?: string) {
+    logger.info('WebSocketService', 'notifyMessageFailed called, msgId:', msgId, 'pendingSends size:', this.pendingSends.size);
+    const pending = this.pendingSends.get(msgId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      this.pendingSends.delete(msgId);
+      pending.callback(false, errorMessage, errorCode);
+      logger.info('WebSocketService', '❌ Message failed:', msgId, errorMessage, 'code:', errorCode);
+    } else {
+      logger.warn('WebSocketService', '⚠️ No pending send found for msgId:', msgId, 'available msgIds:', Array.from(this.pendingSends.keys()));
+    }
+  }
+
+  /**
+   * 标记消息已读
+   */
   markRead(chatId: string, conversationId: string, chatType: 'direct' | 'group') {
     this.socket?.emit('mark_read', { chatSessionId: chatId, conversationId, chatType });
   }
 
+  /**
+   * 开始输入
+   */
   startTyping(chatId: string, conversationId: string, chatType: 'direct' | 'group') {
     this.socket?.emit('typing_start', { chatSessionId: chatId, conversationId, chatType });
   }
 
+  /**
+   * 停止输入
+   */
   stopTyping(chatId: string, conversationId: string, chatType: 'direct' | 'group') {
     this.socket?.emit('typing_stop', { chatSessionId: chatId, conversationId, chatType });
   }
 
+  /**
+   * 发送 AI 助手请求
+   */
   sendAssistantRequest(id: string, input: string, conversationId: string) {
-    if (!this.socket) {
-      console.error('[WebSocket] socket is null, cannot send assistant request');
+    if (!this.socket || !this.socket.connected) {
+      logger.error('WebSocketService', 'Cannot send assistant request: socket not connected');
       return;
     }
-
-    if (!this.socket.connected) {
-      console.error('[WebSocket] socket not connected, cannot send assistant request');
-      return;
-    }
-
     this.socket.emit('assistant_request', { id, input, conversationId });
-    console.log('[WebSocket] Assistant request emitted successfully');
+    logger.info('WebSocketService', 'Assistant request emitted');
   }
 
-  on(event: string, handler: WebSocketEventHandler) {
-    if (!this.eventHandlers.has(event)) {
-      this.eventHandlers.set(event, new Set());
+  /**
+   * 发送翻译请求
+   */
+  sendTranslateRequest(data: { id: string; messageId: string; conversationId: string }) {
+    if (!this.socket || !this.socket.connected) {
+      logger.error('WebSocketService', 'Cannot send translate request: socket not connected');
+      return;
     }
-    this.eventHandlers.get(event)!.add(handler);
-    logger.info('WebSocketService', `📝 Listener registered for event: ${event}, total listeners: ${this.eventHandlers.get(event)!.size}`);
+    this.socket.emit('translate_message', data);
+    logger.info('WebSocketService', 'Translate request emitted');
   }
 
-  off(event: string, handler: WebSocketEventHandler) {
-    const listeners = this.eventHandlers.get(event);
-    const hadListener = listeners?.has(handler) ?? false;
-    listeners?.delete(handler);
-    logger.info('WebSocketService', `🗑️ Listener removed for event: ${event}, remaining: ${listeners?.size ?? 0}`);
-  }
-
-  public emit(event: string, data: unknown) {
-    const listeners = this.eventHandlers.get(event);
-    logger.info('WebSocketService', `📢 Emitting event: ${event}, listeners count: ${listeners?.size ?? 0}`);
-
-    // 触发本地监听器
-    listeners?.forEach(handler => handler(data));
-    
-    // 发送到 Socket.IO 服务器
-    if (this.socket?.connected) {
-      this.socket.emit(event, data);
-    } else {
-      console.warn(`⚠️ WebSocket not connected, event '${event}' not sent to server`);
-    }
-  }
-
+  /**
+   * 断开连接
+   */
   disconnect() {
     this.socket?.disconnect();
     // 清理所有待处理的发送请求
@@ -285,11 +332,12 @@ class WebSocketServiceClass {
     });
     this.pendingSends.clear();
     this.socket = null;
-    // 注意：不清除 eventHandlers，因为监听器可能还需要
-    // eventHandlers 会在下次 connect 时由 setupEventListeners 重新注册到新的 socket
     logger.info('WebSocketService', 'WebSocket disconnected');
   }
 
+  /**
+   * 检查是否已连接
+   */
   isConnected(): boolean {
     return this.socket?.connected ?? false;
   }

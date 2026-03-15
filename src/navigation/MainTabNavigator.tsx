@@ -12,7 +12,6 @@ import { View, Text, StyleSheet } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Q } from '@nozbe/watermelondb';
-import { useWebSocket } from '../contexts/WebSocketContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { Conversation } from '../database/models';
 import MainScreen from '../screens/MainScreen';
@@ -21,6 +20,7 @@ import ContactsScreen from '../screens/ContactsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import { messageService } from '../services/MessageService';
 import { friendRequestService } from '../services/FriendRequestService';
+import { EventBus } from '../events/EventBus';
 import logger from '../utils/logger';
 
 const Tab = createBottomTabNavigator();
@@ -75,7 +75,6 @@ const ChatsScreenWithFocusTracker: React.FC<{
 // Main Tab Navigator Component
 const MainTabNavigator = () => {
   const db = useDatabase();
-  const { onMessage } = useWebSocket();
   const [unreadFriendRequests, setUnreadFriendRequests] = useState(0);
   const [totalUnreadCount, setTotalUnreadCount] = useState(0);
   const [isOnChatsTab, setIsOnChatsTab] = useState(false);
@@ -144,13 +143,13 @@ const MainTabNavigator = () => {
       }
     });
 
-    // 启动全局消息监听（处理所有聊天消息）
+    // 启动全局消息监听（通过 EventBus 监听 WebSocket 消息）
     logger.info('MainTabNavigator', 'Calling messageService.startListener...');
-    messageService.startListener(onMessage);
+    messageService.startListener();
 
-    // 启动 WebSocket 监听（处理好友申请）
+    // 启动 WebSocket 监听（处理好友申请）- 通过 EventBus
     logger.info('MainTabNavigator', 'Calling friendRequestService.startWebSocketListener...');
-    friendRequestService.startWebSocketListener(onMessage);
+    friendRequestService.startWebSocketListener();
 
     logger.info('MainTabNavigator', 'Message services initialized');
 
@@ -161,7 +160,7 @@ const MainTabNavigator = () => {
       friendRequestService.stopWebSocketListener();
       messageService.stopListener();
     };
-  }, [db, onMessage, refreshTotalUnreadCount]);
+  }, [db, refreshTotalUnreadCount]);
 
   // 当切换到 Chats 页面时，清除角标并刷新未读计数
   useEffect(() => {

@@ -1,26 +1,24 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { WebSocketService } from '../services/WebSocketService';
+import { WebSocketService, authEventEmitter } from '../services/WebSocketService';
 import { useAuth } from './AuthContext';
 import { ApiService } from '../services/ApiService';
-import { authEventEmitter } from '../services/WebSocketService';
 import logger from '../utils/logger';
-import {
-  WebSocketMessageData,
-  WebSocketUserStatusData,
-  WebSocketTypingData,
-} from '../types/websocket';
 
 interface WebSocketContextType {
   isConnected: boolean;
-  sendMessage: (conversationId: string, text: string, type?: string, msgId?: string, chatType?: 'direct' | 'group') => void;
+  sendMessage: (
+    conversationId: string,
+    text: string,
+    type?: string,
+    msgId?: string,
+    chatType?: 'direct' | 'group',
+    onSent?: (success: boolean, error?: string, errorCode?: string) => void
+  ) => void;
   markRead: (chatId: string, conversationId: string, chatType: 'direct' | 'group') => void;
   startTyping: (chatId: string, conversationId: string, chatType: 'direct' | 'group') => void;
   stopTyping: (chatId: string, conversationId: string, chatType: 'direct' | 'group') => void;
-  translateMessage: (data: { id: string; messageId: string; conversationId: string }, handler: (response: any) => void) => () => void;
-  onMessage: (handler: (data: WebSocketMessageData) => void) => () => void;
-  onMessageSent: (handler: (data: WebSocketMessageData) => void) => () => void;
-  onUserStatus: (handler: (data: WebSocketUserStatusData) => void) => () => void;
-  onTyping: (handler: (data: WebSocketTypingData) => void) => () => void;
+  sendAssistantRequest: (id: string, input: string, conversationId: string) => void;
+  sendTranslateRequest: (data: { id: string; messageId: string; conversationId: string }) => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
@@ -36,7 +34,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     WebSocketService.connect()
       .then(() => {
-        console.log('✅ WebSocket connected successfully');
+        logger.info('WebSocketContext', '✅ WebSocket connected successfully');
         setIsConnected(true);
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
@@ -44,14 +42,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       })
       .catch((error: Error) => {
-        console.warn('⚠️ WebSocket connect failed:', error.message);
+        logger.warn('WebSocketContext', '⚠️ WebSocket connect failed:', error.message);
         setIsConnected(false);
 
         // 如果是认证失败，清除 token 并触发 logout
         if (error.message === 'Authentication failed' || error.message.includes('Authentication')) {
-          console.log('🔑 WebSocket authentication failed, clearing tokens...');
+          logger.info('WebSocketContext', '🔑 WebSocket authentication failed, clearing tokens...');
           ApiService.clearTokens().then(() => {
-            console.log('🔑 Tokens cleared');
             authEventEmitter.emit('logout');
           });
           return;
@@ -104,39 +101,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, [isAuthenticated, connectWebSocket]);
 
-  // 使用 useCallback 确保 onMessage 引用稳定
-  const onMessage = React.useCallback((handler: (data: WebSocketMessageData) => void) => {
-    logger.info('WebSocketContext', '📝 onMessage called, registering listener for receive_message');
-    logger.info('WebSocketContext', 'Handler type:', typeof handler);
-    const result = WebSocketService.on('receive_message', handler as (data: unknown) => void);
-    logger.info('WebSocketContext', 'Listener registered, result:', result);
-    return () => {
-      logger.info('WebSocketContext', '🗑️ onMessage cleanup, removing listener for receive_message');
-      WebSocketService.off('receive_message', handler as (data: unknown) => void);
-    };
-  }, []);
-
-  const onMessageSent = React.useCallback((handler: (data: WebSocketMessageData) => void) => {
-    WebSocketService.on('message_sent', handler as (data: unknown) => void);
-    return () => WebSocketService.off('message_sent', handler as (data: unknown) => void);
-  }, []);
-
-  const onUserStatus = React.useCallback((handler: (data: WebSocketUserStatusData) => void) => {
-    WebSocketService.on('user_status_changed', handler as (data: unknown) => void);
-    return () => WebSocketService.off('user_status_changed', handler as (data: unknown) => void);
-  }, []);
-
-  const onTyping = React.useCallback((handler: (data: WebSocketTypingData) => void) => {
-    WebSocketService.on('user_typing', handler as (data: unknown) => void);
-    return () => WebSocketService.off('user_typing', handler as (data: unknown) => void);
-  }, []);
-
   return (
     <WebSocketContext.Provider
       value={{
         isConnected,
-        sendMessage: (conversationId, text, type, msgId, chatType) => {
-          WebSocketService.sendMessage(conversationId, text, type, msgId, chatType);
+        sendMessage: (conversationId, text, type, msgId, chatType, onSent) => {
+          WebSocketService.sendMessage(conversationId, text, type, msgId, chatType, onSent);
         },
         markRead: (chatId, conversationId, chatType) => {
           WebSocketService.markRead(chatId, conversationId, chatType);
@@ -147,28 +117,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         stopTyping: (chatId, conversationId, chatType) => {
           WebSocketService.stopTyping(chatId, conversationId, chatType);
         },
-        translateMessage: (data, handler) => {
-          console.log('[WebSocketContext] translateMessage called:', data);
-
-          // 先注册监听器，再发送事件
-          WebSocketService.on('translate_message_response', handler as (data: unknown) => void);
-          console.log('[WebSocketContext] translate_message_response listener registered');
-
-          // 稍后发送事件，确保监听器已注册
-          setTimeout(() => {
-            WebSocketService.emit('translate_message', data);
-            console.log('[WebSocketContext] translate_message event emitted');
-          }, 50);
-
-          return () => {
-            console.log('[WebSocketContext] Cleaning up translate_message listener');
-            WebSocketService.off('translate_message_response', handler as (data: unknown) => void);
-          };
+        sendAssistantRequest: (id, input, conversationId) => {
+          WebSocketService.sendAssistantRequest(id, input, conversationId);
         },
-        onMessage,
-        onMessageSent,
-        onUserStatus,
-        onTyping,
+        sendTranslateRequest: (data) => {
+          WebSocketService.sendTranslateRequest(data);
+        },
       }}
     >
       {children}

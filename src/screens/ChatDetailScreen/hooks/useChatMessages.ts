@@ -1,6 +1,6 @@
 /**
  * useChatMessages - 消息状态管理
- * 
+ *
  * 负责：
  * - 消息状态管理
  * - 数据库订阅监听
@@ -12,9 +12,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Q } from '@nozbe/watermelondb';
 import { Database } from '@nozbe/watermelondb';
 import { Message, Friend, GroupMember } from '../../../database/models';
-import { WebSocketMessageData } from '../../../types/websocket';
 import { MessageInterface } from '../types';
 import logger from '../../../utils/logger';
+import { EventBus, WebSocketMessageData, WebSocketMessageSentData } from '../../../events/EventBus';
 
 interface UseChatMessagesParams {
   database: Database | null;
@@ -22,8 +22,6 @@ interface UseChatMessagesParams {
   chatId: string;
   chatType: 'direct' | 'group';
   user: { id: string; avatarUrl?: string } | null;
-  onMessage: (callback: (data: any) => void) => () => void;
-  onMessageSent: (callback: (data: WebSocketMessageData) => void) => () => void;
   syncMessagesFromServer: () => Promise<void>;
   syncConversationInfo: () => Promise<void>;
   syncUserInfo: (userId: string) => Promise<void>;
@@ -35,8 +33,6 @@ export const useChatMessages = ({
   chatId,
   chatType,
   user,
-  onMessage,
-  onMessageSent,
   syncMessagesFromServer,
   syncConversationInfo,
   syncUserInfo,
@@ -80,7 +76,7 @@ export const useChatMessages = ({
   /**
    * 处理消息发送确认（WebSocket message_sent 事件）
    */
-  const handleMessageSent = useCallback((data: WebSocketMessageData) => {
+  const handleMessageSent = useCallback((data: WebSocketMessageSentData) => {
     logger.debug('useChatMessages', 'Received message_sent event:', JSON.stringify(data));
 
     const updateLocalMessage = async () => {
@@ -90,6 +86,7 @@ export const useChatMessages = ({
           return;
         }
 
+        // 更新本地消息的 seq 和 status
         const messages = await database.collections
           .get<Message>('messages')
           .query(Q.where('msg_id', Q.eq(data.msgId)))
@@ -101,6 +98,9 @@ export const useChatMessages = ({
           await database.write(async () => {
             await messages[0].update((m: Message) => {
               m.status = 'sent';
+              if (data.seq !== undefined) {
+                m.seq = data.seq;
+              }
             });
 
             // 更新会话的最新消息
@@ -118,11 +118,11 @@ export const useChatMessages = ({
             }
           });
 
-          // 更新 UI 状态
+          // 更新 UI 状态（包括 seq）
           setMessages(prevMessages =>
             prevMessages.map(msg =>
               msg.msgId === data.msgId
-                ? { ...msg, sending: false }
+                ? { ...msg, sending: false, seq: data.seq }
                 : msg
             )
           );
@@ -162,8 +162,38 @@ export const useChatMessages = ({
 
       logger.debug('useChatMessages', 'Fetched', dbMessages.length, 'messages');
 
+      // 检查并更新超时的 sending 状态消息
+      const now = Date.now();
+      const timeoutThreshold = 30000; // 30 秒超时阈值（比发送超时稍长，留有余量）
+      const timedOutMessages = dbMessages.filter(
+        msg => msg.status === 'sending' && (now - msg.timestamp) > timeoutThreshold
+      );
+
+      if (timedOutMessages.length > 0) {
+        logger.info('useChatMessages', 'Found', timedOutMessages.length, 'timed out sending messages, marking as failed');
+        await database.write(async () => {
+          for (const msg of timedOutMessages) {
+            await msg.update((m: Message) => {
+              m.status = 'failed';
+              m.updatedAt = now;
+            });
+          }
+        });
+      }
+
+      // 重新获取更新后的消息（如果有的话）
+      const finalMessages = timedOutMessages.length > 0
+        ? await database.collections
+            .get<Message>('messages')
+            .query(
+              Q.where('conversation_id', Q.eq(conversationId)),
+              Q.sortBy('timestamp', Q.desc)
+            )
+            .fetch()
+        : dbMessages;
+
       // 获取所有发送者 ID
-      const senderIds = [...new Set(dbMessages.map(m => m.senderId).filter(Boolean))];
+      const senderIds = [...new Set(finalMessages.map(m => m.senderId).filter(Boolean))];
       logger.debug('useChatMessages', 'Unique senderIds:', senderIds);
 
       // 查询头像信息
@@ -199,7 +229,7 @@ export const useChatMessages = ({
       friendAvatarsRef.current = friendAvatars;
 
       // 格式化为 UI 数据
-      const formattedMessages = dbMessages.map(msg => {
+      const formattedMessages = finalMessages.map(msg => {
         const isMe = msg.senderId === user?.id;
         const sender: 'me' | 'other' = isMe ? 'me' : 'other';
         const senderAvatar = isMe ? user?.avatarUrl : (friendAvatars.get(msg.senderId) || '');
@@ -213,6 +243,8 @@ export const useChatMessages = ({
           senderAvatar,
           timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           sending: msg.status === 'sending',
+          failed: msg.status === 'failed',
+          seq: msg.seq,
         };
       });
 
@@ -278,46 +310,28 @@ export const useChatMessages = ({
             senderAvatar,
             timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             sending: msg.status === 'sending',
+            failed: msg.status === 'failed',
+            seq: msg.seq,
           };
         });
 
         setMessages(formattedMessages);
       });
 
-    // WebSocket 消息监听
-    const unsubscribeMessage = onMessage(async (data: any) => {
+    // 通过 EventBus 监听 WebSocket 消息
+    const unsubscribeMessage = EventBus.on('ws:message', async (data) => {
       logger.info('useChatMessages', 'Received message from WebSocket:', data);
 
       // Note: MessageService already handles saving messages globally
       // We don't need to save here - the database observer will update UI when MessageService saves
 
-      // 检查是否是自己发送的消息（通过 senderId 判断）
-      const isFromMe = data.senderId === user?.id;
-
       if (data.seq && data.seq > latestSeq) {
         setLatestSeq(data.seq);
       }
-
-      // 如果不是自己发送的消息，检查 seq 连续性
-      if (!isFromMe && data.conversationId === conversationId && data.seq) {
-        const localLatestSeq = await getLocalLatestSeq();
-        logger.info('useChatMessages', 'Local latest seq:', localLatestSeq, 'Received seq:', data.seq);
-
-        // 检查 seq 是否连续（允许乱序，本地去重）
-        if (localLatestSeq && data.seq > localLatestSeq + 1) {
-          logger.info('useChatMessages', 'Seq gap detected:', localLatestSeq, '->', data.seq);
-
-          // 检查是否可以调用 syncSeqGap
-          const { messageService } = require('../../../services/MessageService');
-          if (messageService.checkCanSyncGap()) {
-            messageService.syncSeqGap(conversationId, localLatestSeq, data.seq);
-          }
-        }
-      }
     });
 
-    // WebSocket message_sent 事件监听
-    const unsubscribeMessageSent = onMessageSent(handleMessageSent);
+    // 通过 EventBus 监听 message_sent 事件
+    const unsubscribeMessageSent = EventBus.on('ws:message_sent', handleMessageSent);
 
     // 同步服务器消息
     syncMessagesFromServer();
@@ -346,8 +360,6 @@ export const useChatMessages = ({
     chatId,
     chatType,
     user,
-    onMessage,
-    onMessageSent,
     syncMessagesFromServer,
     syncConversationInfo,
     syncUserInfo,

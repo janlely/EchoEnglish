@@ -4,6 +4,34 @@ import { schemaMigrations } from '@nozbe/watermelondb/Schema/migrations';
 // When incrementing schema version in schema.ts, add migration here
 export const migrations = schemaMigrations({
   migrations: [
+    // Migration from schema version 12 to 13
+    // Added last_acked_seq to conversations table for tracking acked messages
+    {
+      toVersion: 13,
+      steps: [
+        {
+          type: 'add_columns',
+          table: 'conversations',
+          columns: [
+            { name: 'last_acked_seq', type: 'number', isOptional: true },
+          ],
+        },
+      ],
+    },
+    // Migration from schema version 11 to 12
+    // Added status column to groups table for tracking dissolved groups
+    {
+      toVersion: 12,
+      steps: [
+        {
+          type: 'add_columns',
+          table: 'groups',
+          columns: [
+            { name: 'status', type: 'string', isOptional: true },
+          ],
+        },
+      ],
+    },
     // Migration from schema version 10 to 11
     // Added seq field to messages table for message ordering
     // Added latest_seq and last_read_seq to conversations table

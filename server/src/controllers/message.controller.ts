@@ -38,7 +38,12 @@ class MessageController {
         message: 'Message sent successfully',
       });
     } catch (error: any) {
-      logger.error('Send message controller error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      if (error.message === '本群已解散' || error.message === '您不是群成员' || error.message === 'Access denied') {
+        logger.info('Send message controller error:', error.message);
+      } else {
+        logger.error('Send message controller error:', error);
+      }
       next(error);
     }
   }
@@ -167,7 +172,12 @@ class MessageController {
         data: result,
       });
     } catch (error: any) {
-      logger.error('Sync messages controller error:', error);
+      // 业务错误（如群已解散）使用 info 级别，其他错误使用 error 级别
+      if (error.message === '本群已解散' || error.message === '您不是群成员' || error.message === 'Access denied') {
+        logger.info('Sync messages controller error:', error.message);
+      } else {
+        logger.error('Sync messages controller error:', error);
+      }
       next(error);
     }
   }

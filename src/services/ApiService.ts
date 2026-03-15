@@ -62,9 +62,11 @@ class ApiServiceClass {
     }
 
     if (!response.ok) {
-      const errorData = data as { error?: string };
-      console.error('[ApiService] request failed:', endpoint, 'error:', errorData?.error);
-      throw new Error(errorData.error || 'Request failed');
+      const errorData = data as { error?: string; code?: string };
+      console.error('[ApiService] request failed:', endpoint, 'error:', errorData?.error, 'code:', errorData?.code);
+      const error = new Error(errorData?.error || 'Request failed') as Error & { code?: string };
+      error.code = errorData?.code;
+      throw error;
     }
 
     return data;

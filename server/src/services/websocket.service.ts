@@ -8,6 +8,7 @@ import chatService from './chat.service';
 import messageService from './message.service';
 import notificationService from './notification.service';
 import prisma from '../config/database';
+import { ErrorCode } from '../constants/errorCodes';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -121,6 +122,7 @@ class WebSocketService {
         const messageSentData = {
           msgId: data.msgId,
           messageId: message.id,
+          seq: message.seq,  // 返回 seq 供前端更新 lastAckedSeq
           status: 'sent',
         };
         logger.info(`[WebSocket] Emitting message_sent to ${userId}:`, JSON.stringify(messageSentData));
@@ -136,8 +138,24 @@ class WebSocketService {
 
         logger.info(`Message sent via WebSocket: ${message.id}`);
       } catch (error: any) {
-        logger.error(`[WebSocket] Send message error:`, error.message);
-        socket.emit('error', { message: error.message });
+        // 业务错误使用 info 级别，其他错误使用 error 级别
+        const isBusinessError = error.code && [
+          ErrorCode.GROUP_NOT_FOUND,
+          ErrorCode.GROUP_DISSOLVED,
+          ErrorCode.NOT_GROUP_MEMBER,
+          ErrorCode.ACCESS_DENIED,
+        ].includes(error.code);
+
+        if (isBusinessError) {
+          logger.info(`[WebSocket] Send message error: ${error.message}, code: ${error.code}`);
+        } else {
+          logger.error(`[WebSocket] Send message error:`, error.message);
+        }
+        socket.emit('error', {
+          code: error.code || ErrorCode.INTERNAL_ERROR,
+          message: error.message,
+          msgId: data.msgId,
+        });
       }
     });
 
@@ -160,7 +178,23 @@ class WebSocketService {
 
         logger.info(`Messages marked as read via WebSocket: ${data.chatSessionId}`);
       } catch (error: any) {
-        socket.emit('error', { message: error.message });
+        // 业务错误使用 info 级别
+        const isBusinessError = error.code && [
+          ErrorCode.GROUP_NOT_FOUND,
+          ErrorCode.GROUP_DISSOLVED,
+          ErrorCode.NOT_GROUP_MEMBER,
+          ErrorCode.ACCESS_DENIED,
+        ].includes(error.code);
+
+        if (isBusinessError) {
+          logger.info(`[WebSocket] Mark read error: ${error.message}, code: ${error.code}`);
+        } else {
+          logger.error(`[WebSocket] Mark read error:`, error.message);
+        }
+        socket.emit('error', {
+          code: error.code || ErrorCode.INTERNAL_ERROR,
+          message: error.message,
+        });
       }
     });
 

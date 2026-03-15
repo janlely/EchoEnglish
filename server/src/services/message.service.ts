@@ -10,6 +10,7 @@ import {
   isGroupConversation,
   getOtherUserIdFromConversationId,
 } from '../utils/conversationId';
+import { ErrorCode, createError } from '../constants/errorCodes';
 
 class MessageService {
   /**
@@ -56,8 +57,25 @@ class MessageService {
       const isGroup = isGroupConversation(conversationId);
 
       if (isGroup) {
-        // 群聊：检查用户是否是群成员
+        // 群聊：检查群状态和用户是否是群成员
         const groupId = conversationId.replace('group_', '');
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const participant = await prisma.groupMember.findFirst({
           where: {
             groupId,
@@ -66,8 +84,7 @@ class MessageService {
         });
 
         if (!participant) {
-          logger.error(`[MessageService] Access denied: user ${senderId} is not member of group ${groupId}`);
-          throw new Error('Access denied');
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
 
         logger.info(`[MessageService] Group chat permission check passed`);
@@ -76,7 +93,7 @@ class MessageService {
         const otherUserId = getOtherUserIdFromConversationId(conversationId, senderId);
         if (!otherUserId) {
           logger.error(`[MessageService] Invalid conversation ID for direct chat: ${conversationId}`);
-          throw new Error('Invalid conversation ID');
+          throw createError(ErrorCode.INVALID_REQUEST, 'Invalid conversation ID');
         }
 
         const friendship = await prisma.friendship.findFirst({
@@ -91,8 +108,8 @@ class MessageService {
         logger.info(`[MessageService] Friendship check result:`, friendship ? 'found' : 'not found');
 
         if (!friendship) {
-          logger.error(`[MessageService] Access denied: user ${senderId} and ${otherUserId} are not friends`);
-          throw new Error('Access denied');
+          logger.info(`[MessageService] Access denied: user ${senderId} and ${otherUserId} are not friends`);
+          throw createError(ErrorCode.ACCESS_DENIED);
         }
 
         logger.info(`[MessageService] Direct chat permission check passed`);
@@ -191,7 +208,20 @@ class MessageService {
         createdAt: message.createdAt,
       };
     } catch (error: unknown) {
-      logger.error('Send message error:', error instanceof Error ? error.message : String(error));
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const err = error as any;
+      const isBusinessError = err.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(err.code);
+
+      if (isBusinessError) {
+        logger.info('Send message error:', err.message, 'code:', err.code);
+      } else {
+        logger.error('Send message error:', err.message || err);
+      }
       throw error;
     }
   }
@@ -213,6 +243,23 @@ class MessageService {
 
       if (isGroup) {
         const groupId = conversationId.replace('group_', '');
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const participant = await prisma.groupMember.findFirst({
           where: {
             groupId,
@@ -221,13 +268,13 @@ class MessageService {
         });
 
         if (!participant) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
       } else {
         // 私聊：检查好友关系
         const otherUserId = getOtherUserIdFromConversationId(conversationId, userId);
         if (!otherUserId) {
-          throw new Error('Invalid conversation ID');
+          throw createError(ErrorCode.INVALID_REQUEST, 'Invalid conversation ID');
         }
 
         const friendship = await prisma.friendship.findFirst({
@@ -240,7 +287,7 @@ class MessageService {
         });
 
         if (!friendship) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.ACCESS_DENIED);
         }
       }
 
@@ -290,7 +337,19 @@ class MessageService {
         },
       };
     } catch (error: any) {
-      logger.error('Get messages error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('Get messages error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('Get messages error:', error);
+      }
       throw error;
     }
   }
@@ -331,6 +390,23 @@ class MessageService {
 
       if (isGroup) {
         const groupId = conversationId.replace('group_', '');
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const participant = await prisma.groupMember.findFirst({
           where: {
             groupId,
@@ -339,13 +415,13 @@ class MessageService {
         });
 
         if (!participant) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
       } else {
         // 私聊：检查好友关系
         const otherUserId = getOtherUserIdFromConversationId(conversationId, userId);
         if (!otherUserId) {
-          throw new Error('Invalid conversation ID');
+          throw createError(ErrorCode.INVALID_REQUEST, 'Invalid conversation ID');
         }
 
         const friendship = await prisma.friendship.findFirst({
@@ -358,7 +434,7 @@ class MessageService {
         });
 
         if (!friendship) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.ACCESS_DENIED);
         }
       }
 
@@ -390,7 +466,19 @@ class MessageService {
       logger.info(`Marked ${result.count} messages as read for user ${userId}, conversation ${conversationId}`);
       return { success: true, count: result.count };
     } catch (error: any) {
-      logger.error('Mark messages as read error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('Mark messages as read error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('Mark messages as read error:', error);
+      }
       throw error;
     }
   }
@@ -475,16 +563,34 @@ class MessageService {
 
       if (isGroup) {
         const groupId = conversationId.replace('group_', '');
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const participant = await prisma.groupMember.findFirst({
           where: { groupId, userId },
         });
+
         if (!participant) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
       } else {
         const otherUserId = getOtherUserIdFromConversationId(conversationId, userId);
         if (!otherUserId) {
-          throw new Error('Invalid conversation ID');
+          throw createError(ErrorCode.INVALID_REQUEST, 'Invalid conversation ID');
         }
 
         const friendship = await prisma.friendship.findFirst({
@@ -496,7 +602,7 @@ class MessageService {
           },
         });
         if (!friendship) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.ACCESS_DENIED);
         }
       }
 
@@ -540,7 +646,19 @@ class MessageService {
         createdAt: msg.createdAt,
       }));
     } catch (error: any) {
-      logger.error('Get messages after error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('Get messages after error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('Get messages after error:', error);
+      }
       throw error;
     }
   }
@@ -621,16 +739,34 @@ class MessageService {
 
       if (isGroup) {
         const groupId = conversationId.replace('group_', '');
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const participant = await prisma.groupMember.findFirst({
           where: { groupId, userId: currentUserId },
         });
+
         if (!participant) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
       } else {
         const otherUserId = getOtherUserIdFromConversationId(conversationId, currentUserId);
         if (!otherUserId) {
-          throw new Error('Invalid conversation ID');
+          throw createError(ErrorCode.INVALID_REQUEST, 'Invalid conversation ID');
         }
 
         const friendship = await prisma.friendship.findFirst({
@@ -642,7 +778,7 @@ class MessageService {
           },
         });
         if (!friendship) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.ACCESS_DENIED);
         }
       }
 
@@ -723,7 +859,19 @@ class MessageService {
         latestSeq,
       };
     } catch (error: any) {
-      logger.error('Sync messages error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('Sync messages error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('Sync messages error:', error);
+      }
       throw error;
     }
   }
@@ -827,17 +975,35 @@ class MessageService {
 
       if (isGroup) {
         const groupId = conversationId.replace('group_', '');
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const participant = await prisma.groupMember.findFirst({
           where: { groupId, userId },
         });
+
         if (!participant) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
       } else {
         // For direct chat, verify friendship
         const otherUserId = getOtherUserIdFromConversationId(conversationId, userId);
         if (!otherUserId) {
-          throw new Error('Invalid conversation ID');
+          throw createError(ErrorCode.INVALID_REQUEST, 'Invalid conversation ID');
         }
 
         const friendship = await prisma.friendship.findFirst({
@@ -849,7 +1015,7 @@ class MessageService {
           },
         });
         if (!friendship) {
-          throw new Error('Access denied');
+          throw createError(ErrorCode.ACCESS_DENIED);
         }
       }
 
@@ -885,7 +1051,19 @@ class MessageService {
 
       return contextMessages;
     } catch (error: any) {
-      logger.error('Get recent messages for context error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('Get recent messages for context error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('Get recent messages for context error:', error);
+      }
       throw error;
     }
   }
@@ -950,7 +1128,19 @@ class MessageService {
 
       return { before, after };
     } catch (error: any) {
-      logger.error('Get messages for translation error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('Get messages for translation error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('Get messages for translation error:', error);
+      }
       throw error;
     }
   }

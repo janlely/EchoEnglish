@@ -1,20 +1,20 @@
 /**
  * MessageService - 全局消息服务
- * 
+ *
  * 负责：
  * - 监听所有新消息（无论用户在哪个页面）
  * - 保存消息到本地数据库
  * - 通知监听器有新消息
- * 
+ *
  * 注意：未读数管理由后端接口负责，本服务只负责消息存储和通知
  */
 
 import { Database } from '@nozbe/watermelondb';
 import { Q } from '@nozbe/watermelondb';
 import { Message, Conversation, Friend } from '../database/models';
-import { WebSocketMessageData } from '../types/websocket';
 import logger from '../utils/logger';
 import { TokenStorage } from './TokenStorage';
+import { EventBus, WebSocketMessageData } from '../events/EventBus';
 
 type MessageListener = (data: WebSocketMessageData) => void;
 type ConversationUpdateListener = () => void;
@@ -79,9 +79,9 @@ class MessageService {
   }
 
   /**
-   * 开始监听新消息
+   * 开始监听新消息（通过 EventBus 全局监听）
    */
-  startListener(onMessage: (callback: (data: WebSocketMessageData) => void) => () => void) {
+  startListener() {
     logger.info('MessageService', '🚀 startListener called');
 
     // 清理之前的监听（如果存在）
@@ -90,16 +90,15 @@ class MessageService {
       this.wsCleanup();
     }
 
-    logger.info('MessageService', 'Calling onMessage callback to register listener...');
+    logger.info('MessageService', 'Subscribing to EventBus ws:message...');
 
-    // 注册新的监听
-    this.wsCleanup = onMessage((data: WebSocketMessageData) => {
-      logger.info('MessageService', '📥 Callback triggered, calling handleNewMessage:', JSON.stringify(data));
+    // 通过 EventBus 订阅 WebSocket 消息
+    this.wsCleanup = EventBus.on('ws:message', (data: WebSocketMessageData) => {
+      logger.info('MessageService', '📥 EventBus ws:message received:', JSON.stringify(data));
       this.handleNewMessage(data);
     });
 
-    logger.info('MessageService', 'wsCleanup set:', !!this.wsCleanup);
-    logger.info('MessageService', 'Message listener started');
+    logger.info('MessageService', 'Message listener started via EventBus');
   }
 
   /**
@@ -259,8 +258,8 @@ class MessageService {
           message.conversationId = data.conversationId || data.targetId || '';
           message.chatType = data.chatType || 'direct';
           message.targetId = data.targetId || data.conversationId || '';
-          message.text = data.text;
-          message.senderId = data.senderId;
+          message.text = data.text || '';
+          message.senderId = data.senderId || '';
           message.chatSessionId = data.targetId || data.conversationId || '';
           message.status = data.status || 'sent';
           message.timestamp = data.createdAt ? new Date(data.createdAt).getTime() : Date.now();
@@ -274,7 +273,7 @@ class MessageService {
           .fetch();
 
         // 计算 targetId：优先使用 data.targetId，如果没有则解析 conversationId
-        const targetId = data.targetId || this.parseTargetId(conversationId, data.chatType || 'direct', data.senderId);
+        const targetId = data.targetId || this.parseTargetId(conversationId, data.chatType || 'direct', data.senderId || '');
         logger.info('MessageService', 'Parsed targetId:', targetId, 'from conversationId:', conversationId, 'senderId:', data.senderId);
 
         if (conversations.length > 0) {

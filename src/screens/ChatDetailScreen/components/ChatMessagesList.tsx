@@ -1,6 +1,6 @@
 /**
  * ChatMessagesList - 消息列表组件
- * 
+ *
  * 负责：
  * - 渲染消息列表（FlatList）
  * - 消息长按选择
@@ -9,12 +9,12 @@
 
 import React, { useRef } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { MessageInterface } from '../types';
+import { MessageInterface, SelectedMessage } from '../types';
 import MessageBubble from './MessageBubble';
 
 interface ChatMessagesListProps {
   messages: MessageInterface[];
-  onMessageLongPress: (message: { id: string; msgId: string; text: string }, ref: View | null) => void;
+  onMessageLongPress: (message: SelectedMessage, ref: View | null) => void;
   onMessageRetry: (message: MessageInterface) => void;
 }
 
@@ -49,7 +49,13 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
       }}
       onLongPress={() => {
         const ref = bubbleRefs.current.get(item.id) || null;
-        onMessageLongPress({ id: item.id, msgId: item.msgId || '', text: item.text }, ref);
+        onMessageLongPress({
+          id: item.id,
+          msgId: item.msgId || '',
+          text: item.text,
+          seq: item.seq,
+          senderId: item.senderId,
+        }, ref);
       }}
       onRetry={() => onMessageRetry(item)}
     />

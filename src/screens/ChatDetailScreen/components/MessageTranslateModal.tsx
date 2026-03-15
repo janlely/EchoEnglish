@@ -14,6 +14,7 @@ import { useDatabase } from '@nozbe/watermelondb/hooks';
 import { Message } from '../../../database/models';
 import { Q } from '@nozbe/watermelondb';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
+import { EventBus } from '../../../events/EventBus';
 import logger from '../../../utils/logger';
 
 interface MessageTranslateModalProps {
@@ -40,19 +41,43 @@ const MessageTranslateModal: React.FC<MessageTranslateModalProps> = ({
   onClose,
 }) => {
   const database = useDatabase();
-  const { translateMessage } = useWebSocket();
+  const { sendTranslateRequest } = useWebSocket();
   const [isLoading, setIsLoading] = useState(true);
   const [translation, setTranslation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
+
+  // 使用 ref 存储 unsubscribe 函数，确保可以在清理时调用
+  const unsubscribeRef = React.useRef<(() => void) | null>(null);
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 清理函数
+  const cleanup = React.useCallback(() => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
 
   // Reset state when modal opens
   useEffect(() => {
     if (visible) {
       resetState();
       startTranslation();
+    } else {
+      // modal 关闭时清理
+      cleanup();
     }
-  }, [visible, messageId]);
+
+    // 组件卸载或 visible 变化时清理
+    return () => {
+      cleanup();
+    };
+  }, [visible, messageId, cleanup]);
 
   const resetState = () => {
     setIsLoading(true);
@@ -62,6 +87,9 @@ const MessageTranslateModal: React.FC<MessageTranslateModalProps> = ({
   };
 
   const startTranslation = async () => {
+    // 先清理之前的监听器
+    cleanup();
+
     const requestId = `translate_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     logger.debug('MessageTranslateModal', '========== START TRANSLATION ==========');
@@ -82,72 +110,80 @@ const MessageTranslateModal: React.FC<MessageTranslateModalProps> = ({
 
     // No cache, request translation from backend
     logger.debug('MessageTranslateModal', '❌ No cache found, requesting from backend...');
-    logger.debug('MessageTranslateModal', 'Calling translateMessage WebSocket event...');
+    logger.debug('MessageTranslateModal', 'Calling sendTranslateRequest WebSocket event...');
 
     // Set timeout to detect no response
-    const timeoutId = setTimeout(() => {
+    timeoutRef.current = setTimeout(() => {
       logger.error('MessageTranslateModal', '⏰ Translation timeout - no response from backend');
       setError('翻译超时，请检查网络连接');
       setIsLoading(false);
     }, 30000); // 30 秒超时
 
-    // Listen for translation response
-    const unsubscribe = translateMessage(
-      {
-        id: requestId,
-        messageId,
-        conversationId,
-      },
-      (response: any) => {
-        // Clear timeout on first response
-        clearTimeout(timeoutId);
-        
-        // 响应格式：{ type: 'translate_message_response', requestId: '...', data: { type: 'start', ... } }
-        // 使用 JSON 序列化确保能正确访问嵌套对象
-        const responseObj = JSON.parse(JSON.stringify(response));
-        const responseData = responseObj?.data;
-        
-        console.log('[MessageTranslateModal] responseObj:', responseObj);
-        console.log('[MessageTranslateModal] responseData:', responseData);
-        console.log('[MessageTranslateModal] responseData.type:', responseData?.type);
-        
-        if (!responseData) {
-          logger.warn('MessageTranslateModal', 'No data in response');
-          return;
-        }
-
-        switch (responseData.type) {
-          case 'start':
-            setIsLoading(false);
-            break;
-
-          case 'chunk':
-            setTranslation(prev => prev + (responseData.content || ''));
-            break;
-
-          case 'done':
-            const finalTranslation = responseData.translation || '';
-            setTranslation(finalTranslation);
-            setIsLoading(false);
-            saveTranslationToDatabase(messageId, finalTranslation);
-            break;
-
-          case 'error':
-            setError(responseData.error || 'Translation failed');
-            setIsLoading(false);
-            break;
-        }
+    // Listen for translation response via EventBus
+    unsubscribeRef.current = EventBus.on('ws:translate_response', (response: any) => {
+      // Clear timeout on first response
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
-    );
 
-    logger.debug('MessageTranslateModal', 'WebSocket listener registered');
+      // 响应格式：{ type: 'translate_message_response', requestId: '...', data: { type: 'start', ... } }
+      // 使用 JSON 序列化确保能正确访问嵌套对象
+      const responseObj = JSON.parse(JSON.stringify(response));
+      const responseData = responseObj?.data;
 
-    // Cleanup function
-    return () => {
-      logger.debug('MessageTranslateModal', 'Cleaning up translation listener');
-      clearTimeout(timeoutId);
-      unsubscribe();
-    };
+      console.log('[MessageTranslateModal] responseObj:', responseObj);
+      console.log('[MessageTranslateModal] responseData:', responseData);
+      console.log('[MessageTranslateModal] responseData.type:', responseData?.type);
+
+      if (!responseData) {
+        logger.warn('MessageTranslateModal', 'No data in response');
+        return;
+      }
+
+      switch (responseData.type) {
+        case 'start':
+          setIsLoading(false);
+          break;
+
+        case 'chunk':
+          setTranslation(prev => prev + (responseData.content || ''));
+          break;
+
+        case 'done':
+          const finalTranslation = responseData.translation || '';
+          setTranslation(finalTranslation);
+          setIsLoading(false);
+          saveTranslationToDatabase(messageId, finalTranslation);
+          // Clean up listener after done
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+          }
+          break;
+
+        case 'error':
+          setError(responseData.error || 'Translation failed');
+          setIsLoading(false);
+          // Clean up listener after error
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+          }
+          break;
+      }
+    });
+
+    logger.debug('MessageTranslateModal', 'WebSocket listener registered via EventBus');
+
+    // Send translation request
+    sendTranslateRequest({
+      id: requestId,
+      messageId,
+      conversationId,
+    });
+
+    logger.debug('MessageTranslateModal', 'Translation request sent');
   };
 
   /**

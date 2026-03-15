@@ -1,6 +1,6 @@
 /**
  * useMessageSender - 消息发送逻辑
- * 
+ *
  * 负责：
  * - 发送消息
  * - 重试失败消息
@@ -11,10 +11,11 @@
 import { useCallback, RefObject } from 'react';
 import { Q } from '@nozbe/watermelondb';
 import { Database } from '@nozbe/watermelondb';
-import { Message, Conversation } from '../../../database/models';
+import { Message, Conversation, Group } from '../../../database/models';
 import { MessageInterface } from '../types';
 import { generateMsgId, SENDING_TIMEOUT } from '../utils';
 import logger from '../../../utils/logger';
+import { isGroupDissolvedError } from '../../../constants/errorCodes';
 
 interface UseMessageSenderParams {
   database: Database | null;
@@ -31,9 +32,10 @@ interface UseMessageSenderParams {
     type: string,
     msgId: string,
     chatType: string,
-    onSent?: (success: boolean) => void
+    onSent?: (success: boolean, error?: string, errorCode?: string) => void
   ) => void;
   sendingTimeouts: RefObject<Map<string, any>>;
+  onGroupDissolved?: () => void;
 }
 
 export const useMessageSender = ({
@@ -47,6 +49,7 @@ export const useMessageSender = ({
   setMessages,
   sendMessage,
   sendingTimeouts,
+  onGroupDissolved,
 }: UseMessageSenderParams) => {
   /**
    * 发送消息
@@ -116,11 +119,40 @@ export const useMessageSender = ({
       logger.debug('useMessageSender', 'Calling sendMessage via WebSocket with msgId:', msgId);
 
       // 处理发送结果
-      const handleSentResult = (success: boolean) => {
+      const handleSentResult = (success: boolean, error?: string, errorCode?: string) => {
         if (success) {
           logger.debug('useMessageSender', 'Message sent successfully:', msgId);
         } else {
-          logger.warn('useMessageSender', 'Message send failed/timeout:', msgId);
+          logger.warn('useMessageSender', 'Message send failed/timeout:', msgId, 'error:', error, 'code:', errorCode);
+
+          // 使用错误码判断是否为群解散相关错误
+          if (isGroupDissolvedError(errorCode) && chatType === 'group') {
+            logger.info('useMessageSender', 'Group dissolved, updating local status');
+            // 更新群组状态为已解散
+            if (database) {
+              database.write(async () => {
+                const groupRecords = await database.collections
+                  .get<Group>('groups')
+                  .query(Q.where('group_id', Q.eq(chatId)))
+                  .fetch();
+
+                if (groupRecords.length > 0) {
+                  await groupRecords[0].update((g: Group) => {
+                    g.status = 'dissolved';
+                    g.updatedAt = Date.now();
+                  });
+                  logger.info('useMessageSender', 'Group status updated to dissolved');
+                }
+              }).catch(err => {
+                logger.error('useMessageSender', 'Error updating group status:', err);
+              });
+            }
+            // 通知父组件群已解散
+            if (onGroupDissolved) {
+              onGroupDissolved();
+            }
+          }
+
           // 标记为失败
           setMessages(prev =>
             prev.map(msg =>
@@ -148,10 +180,38 @@ export const useMessageSender = ({
 
       // 清空输入框
       setInputText('');
-    } catch (error) {
+    } catch (error: any) {
       logger.error('useMessageSender', 'Error sending message:', error);
+
+      // 使用错误码判断是否为群解散相关错误
+      if (isGroupDissolvedError(error?.code) && chatType === 'group') {
+        logger.info('useMessageSender', 'Group dissolved, updating local status');
+        // 更新群组状态为已解散
+        if (database) {
+          database.write(async () => {
+            const groupRecords = await database.collections
+              .get<Group>('groups')
+              .query(Q.where('group_id', Q.eq(chatId)))
+              .fetch();
+
+            if (groupRecords.length > 0) {
+              await groupRecords[0].update((g: Group) => {
+                g.status = 'dissolved';
+                g.updatedAt = Date.now();
+              });
+              logger.info('useMessageSender', 'Group status updated to dissolved');
+            }
+          }).catch(err => {
+            logger.error('useMessageSender', 'Error updating group status:', err);
+          });
+        }
+        // 通知父组件群已解散
+        if (onGroupDissolved) {
+          onGroupDissolved();
+        }
+      }
     }
-  }, [database, conversationId, chatId, chatType, user, inputText, sendMessage, setMessages, setInputText, sendingTimeouts]);
+  }, [database, conversationId, chatId, chatType, user, inputText, sendMessage, setMessages, setInputText, sendingTimeouts, onGroupDissolved]);
 
   /**
    * 重试发送失败的消息

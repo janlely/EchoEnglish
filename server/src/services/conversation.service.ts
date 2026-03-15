@@ -6,7 +6,7 @@ import {
   isGroupConversation,
   getOtherUserIdFromConversationId,
 } from '../utils/conversationId';
-import { log } from 'console';
+import { ErrorCode, createError } from '../constants/errorCodes';
 
 interface ConversationInfo {
   conversationId: string;
@@ -153,27 +153,34 @@ class ConversationService {
       const isGroup = isGroupConversation(conversationId);
 
       if (isGroup) {
-        // 群聊：获取群信息并验证用户是否是群成员
+        // 群聊：获取群信息并验证
         const groupId = conversationId.replace('group_', '');
-        
-        // 验证用户是否是群成员
+
+        // 1. 先检查群是否存在
+        const group = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { id: true, status: true, name: true, avatarUrl: true },
+        });
+
+        if (!group) {
+          throw createError(ErrorCode.GROUP_NOT_FOUND);
+        }
+
+        // 2. 检查群是否已解散
+        if (group.status === 'dissolved') {
+          throw createError(ErrorCode.GROUP_DISSOLVED);
+        }
+
+        // 3. 最后检查成员身份
         const membership = await prisma.groupMember.findFirst({
           where: {
             groupId,
             userId,
           },
         });
-        
-        if (!membership) {
-          throw new Error('Access denied: User is not a member of this group');
-        }
-        
-        const group = await prisma.group.findUnique({
-          where: { id: groupId },
-        });
 
-        if (!group) {
-          throw new Error('Group not found');
+        if (!membership) {
+          throw createError(ErrorCode.NOT_GROUP_MEMBER);
         }
 
         // 获取或创建 UserConversationState
@@ -252,7 +259,19 @@ class ConversationService {
         };
       }
     } catch (error: any) {
-      logger.error('[ConversationService] getConversationInfo error:', error);
+      // 业务错误使用 info 级别，其他错误使用 error 级别
+      const isBusinessError = error.code && [
+        ErrorCode.GROUP_NOT_FOUND,
+        ErrorCode.GROUP_DISSOLVED,
+        ErrorCode.NOT_GROUP_MEMBER,
+        ErrorCode.ACCESS_DENIED,
+      ].includes(error.code);
+
+      if (isBusinessError) {
+        logger.info('[ConversationService] getConversationInfo error:', error.message, 'code:', error.code);
+      } else {
+        logger.error('[ConversationService] getConversationInfo error:', error);
+      }
       throw error;
     }
   }

@@ -1,12 +1,17 @@
 import React, { useRef } from 'react';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import BubbleMenu, { BubbleMenuItem } from '../../../components/BubbleMenu';
+import { MenuAction } from '../types';
 
 interface MessageActionMenuProps {
   visible: boolean;
   messageText: string;
   messageId: string;
-  onPress: (action: 'translate' | 'copy') => void;
+  msgId?: string;
+  seq?: number;
+  senderId?: string;
+  currentUserId?: string;
+  onPress: (action: MenuAction) => void;
   onClose: () => void;
   // 锚点 ref（消息气泡的位置）
   anchorRef?: React.RefObject<any>;
@@ -23,6 +28,10 @@ const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
   visible,
   messageText,
   messageId,
+  msgId,
+  seq,
+  senderId,
+  currentUserId,
   onPress,
   onClose,
   anchorRef,
@@ -34,13 +43,18 @@ const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
   const items: BubbleMenuItem[] = [
     {
       id: 'translate',
-      label: '🔤 翻译',
+      label: '翻译',
       onPress: () => onPress('translate'),
     },
     {
       id: 'copy',
-      label: '📋 复制',
+      label: '复制',
       onPress: () => onPress('copy'),
+    },
+    {
+      id: 'delete',
+      label: '删除',
+      onPress: () => onPress('delete'),
     },
   ];
 
@@ -55,9 +69,12 @@ const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
       fromRef={ref}
       showArrow={true}
       placement={placement}
+      layout="horizontal"
       items={items}
     />
   );
 };
+
+const styles = StyleSheet.create({});
 
 export default MessageActionMenu;

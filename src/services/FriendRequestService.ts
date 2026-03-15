@@ -18,6 +18,7 @@ import {
   FriendRequest as ApiFriendRequest,
 } from '../api/contacts';
 import { FriendRequest } from '../database/models';
+import { EventBus } from '../events/EventBus';
 import logger from '../utils/logger';
 
 // WebSocket 事件类型
@@ -363,22 +364,22 @@ export class FriendRequestService {
   }
 
   /**
-   * 开始 WebSocket 监听
+   * 开始 WebSocket 监听（通过 EventBus）
    */
-  startWebSocketListener(onMessage: (callback: (data: any) => void) => () => void) {
+  startWebSocketListener() {
     // 清理之前的监听
     if (this.wsListenerCleanup) {
       this.wsListenerCleanup();
     }
 
-    // 设置新的监听
-    this.wsListenerCleanup = onMessage((data: any) => {
+    // 通过 EventBus 订阅 WebSocket 消息
+    this.wsListenerCleanup = EventBus.on('ws:message', (data: any) => {
       if (data.type === 'friend_request') {
         this.handleWebSocketEvent(data as FriendRequestWebSocketEvent);
       }
     });
 
-    logger.info('FriendRequestService', 'WebSocket friend request listener started');
+    logger.info('FriendRequestService', 'WebSocket friend request listener started via EventBus');
   }
 
   /**

@@ -27,7 +27,12 @@ class ConversationController {
         data: { conversations },
       });
     } catch (error: any) {
-      logger.error('Get conversations with unread controller error:', error);
+      // 业务错误使用 info 级别
+      if (error.message === '本群已解散' || error.message === '您不是群成员' || error.message === 'Access denied') {
+        logger.info('Get conversations with unread controller error:', error.message);
+      } else {
+        logger.error('Get conversations with unread controller error:', error);
+      }
       next(error);
     }
   }
@@ -47,7 +52,12 @@ class ConversationController {
         data: info,
       });
     } catch (error: any) {
-      logger.error('Get conversation info controller error:', error);
+      // 业务错误使用 info 级别
+      if (error.message === '本群已解散' || error.message === '您不是群成员' || error.message === 'Access denied') {
+        logger.info('Get conversation info controller error:', error.message);
+      } else {
+        logger.error('Get conversation info controller error:', error);
+      }
       next(error);
     }
   }

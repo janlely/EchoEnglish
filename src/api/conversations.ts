@@ -96,3 +96,18 @@ export const ackMessages = async (
     throw error;
   }
 };
+
+/**
+ * 删除消息
+ */
+export const deleteMessage = async (messageId: string): Promise<void> => {
+  const response = await ApiService.request<{ success: boolean }>(
+    `/api/chats/messages/${messageId}`,
+    {
+      method: 'DELETE',
+    }
+  );
+  if (!response.success) {
+    throw new Error('Failed to delete message');
+  }
+};

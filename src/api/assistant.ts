@@ -1,5 +1,6 @@
 import { API_CONFIG } from '../config/constants';
 import { getAuthToken } from '../services/ApiService';
+import { EventBus } from '../events/EventBus';
 
 export interface ContextMessage {
   text: string;
@@ -237,8 +238,8 @@ export const streamAnalyze = (
     }
   };
 
-  // Register the event handler
-  WebSocketService.on('assistant_response_chunk', handleResponseChunk);
+  // Register the event handler via EventBus
+  const unsubscribe = EventBus.on('ws:assistant_chunk', handleResponseChunk);
 
   // Send the assistant request
   setTimeout(() => {
@@ -251,7 +252,7 @@ export const streamAnalyze = (
     close: () => {
       isClosed = true;
       // Remove the event listener when closing
-      WebSocketService.off('assistant_response_chunk', handleResponseChunk);
+      unsubscribe();
     },
   };
 };

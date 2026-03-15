@@ -7,6 +7,7 @@
  * - 支持自定义箭头位置
  * - 自动检测边界并调整位置
  * - 支持 WeChat 风格的圆角气泡样式
+ * - 支持横向和纵向布局
  */
 
 import React, { useRef, useState } from 'react';
@@ -39,6 +40,8 @@ export interface BubbleMenuProps {
   showArrow?: boolean;
   // 放置位置：'auto' | 'top' | 'bottom' | 'left' | 'right' | 'floating'
   placement?: 'auto' | 'top' | 'bottom' | 'left' | 'right' | 'floating';
+  // 布局方向：纵向 | 横向
+  layout?: 'vertical' | 'horizontal';
   // 自定义样式
   menuStyle?: StyleProp<ViewStyle>;
   // 背景颜色
@@ -59,6 +62,7 @@ const BubbleMenu: React.FC<BubbleMenuProps> = ({
   children,
   showArrow = true,
   placement = 'auto',
+  layout = 'vertical',
   menuStyle,
   backgroundColor = '#ffffff',
   borderRadius = 12,
@@ -67,9 +71,11 @@ const BubbleMenu: React.FC<BubbleMenuProps> = ({
 }) => {
   // 创建一个内部 ref 用于内部使用
   const internalRef = useRef<any>(null);
-  
+
   // 使用传入的 fromRef 或内部 ref
   const effectiveRef = fromRef || internalRef;
+
+  const isHorizontal = layout === 'horizontal';
 
   return (
     <Popover
@@ -80,6 +86,7 @@ const BubbleMenu: React.FC<BubbleMenuProps> = ({
       popoverStyle={[
         styles.popover,
         { backgroundColor, borderRadius },
+        isHorizontal && styles.popoverHorizontal,
         menuStyle,
       ]}
       backgroundStyle={showOverlay ? { backgroundColor: 'rgba(0, 0, 0, 0.4)' } : { backgroundColor: 'transparent' }}
@@ -89,12 +96,19 @@ const BubbleMenu: React.FC<BubbleMenuProps> = ({
       {children ? (
         children
       ) : (
-        <View style={styles.menuContent}>
+        <View style={[styles.menuContent, isHorizontal && styles.menuContentHorizontal]}>
           {items.map((item, index) => (
             <React.Fragment key={item.id}>
-              {index > 0 && <View style={styles.separator} />}
+              {index > 0 && (
+                <View
+                  style={[
+                    isHorizontal ? styles.separatorHorizontal : styles.separator,
+                    isHorizontal && { height: '60%', alignSelf: 'center' }
+                  ]}
+                />
+              )}
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, isHorizontal && styles.menuItemHorizontal]}
                 onPress={() => {
                   item.onPress?.();
                   onClose();
@@ -121,8 +135,17 @@ const styles = StyleSheet.create({
     padding: 0,
     minWidth: 150,
   },
+  popoverHorizontal: {
+    minWidth: 0,
+  },
   menuContent: {
     paddingVertical: 8,
+  },
+  menuContentHorizontal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   menuItem: {
     flexDirection: 'row',
@@ -131,9 +154,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     minWidth: 120,
   },
+  menuItemHorizontal: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    minWidth: 0,
+  },
   menuItemIcon: {
     fontSize: 18,
-    marginRight: 12,
+    marginRight: 8,
   },
   menuItemLabel: {
     fontSize: 15,
@@ -144,6 +172,11 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#f0f0f0',
     marginVertical: 4,
+  },
+  separatorHorizontal: {
+    width: 1,
+    backgroundColor: '#f0f0f0',
+    marginHorizontal: 2,
   },
 });
 
