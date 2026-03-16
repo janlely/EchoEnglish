@@ -30,6 +30,9 @@ class MessageService {
   private processingMsgIds = new Map<string, Promise<any>>(); // 正在处理中的消息 ID -> Promise（防止并发重复处理）
   private readonly MAX_PROCESSED_MSG_IDS = 1000; // 最多缓存 1000 个 ID
 
+  // 当前打开的会话 ID（用于判断是否需要增加未读数）
+  private currentConversationId: string | null = null;
+
   /**
    * 解析 conversationId 获取 targetId
    * - 单聊：conversationId 格式为 "userId_otherUserId"，返回对方用户 ID（非 senderId 的那个）
@@ -62,6 +65,21 @@ class MessageService {
   setDatabase(db: Database | null) {
     this.database = db;
     logger.info('MessageService', 'Database instance set');
+  }
+
+  /**
+   * 设置当前打开的会话（进入聊天页面时调用）
+   */
+  setCurrentConversation(conversationId: string | null) {
+    this.currentConversationId = conversationId;
+    logger.info('MessageService', 'Current conversation set to:', conversationId);
+  }
+
+  /**
+   * 获取当前打开的会话 ID
+   */
+  getCurrentConversation(): string | null {
+    return this.currentConversationId;
   }
 
   /**
@@ -242,7 +260,11 @@ class MessageService {
                 conv.latestSummary = data.text;
                 conv.latestSenderId = data.senderId;
                 conv.latestTimestamp = data.createdAt ? new Date(data.createdAt).getTime() : Date.now();
-                conv.unreadCount = (conv.unreadCount || 0) + 1;
+                // 只有非当前会话才增加未读数
+                const isCurrentConversation = this.currentConversationId === conversationId;
+                if (!isCurrentConversation) {
+                  conv.unreadCount = (conv.unreadCount || 0) + 1;
+                }
                 conv.updatedAt = Date.now();
               });
             }
@@ -283,11 +305,17 @@ class MessageService {
             conv.latestSummary = data.text;
             conv.latestSenderId = data.senderId;
             conv.latestTimestamp = data.createdAt ? new Date(data.createdAt).getTime() : Date.now();
-            conv.unreadCount = (conv.unreadCount || 0) + 1;
+            // 只有非当前会话才增加未读数
+            const isCurrentConversation = this.currentConversationId === conversationId;
+            if (!isCurrentConversation) {
+              conv.unreadCount = (conv.unreadCount || 0) + 1;
+            }
             conv.updatedAt = Date.now();
           });
         } else {
           logger.info('MessageService', '➕ Creating new conversation:', conversationId);
+          // 检查是否为当前会话
+          const isCurrentConversation = this.currentConversationId === conversationId;
           await db.collections.get<Conversation>('conversations').create((conv: Conversation) => {
             conv.conversationId = conversationId;
             conv.type = data.chatType || 'direct';
@@ -297,7 +325,7 @@ class MessageService {
             conv.latestSenderId = data.senderId;
             conv.latestTimestamp = data.createdAt ? new Date(data.createdAt).getTime() : Date.now();
             conv.lastReadSeq = 0;
-            conv.unreadCount = 1;
+            conv.unreadCount = isCurrentConversation ? 0 : 1; // 当前会话不增加未读数
             conv.isPinned = false;
             conv.createdAt = Date.now();
             conv.updatedAt = Date.now();

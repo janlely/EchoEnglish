@@ -10,7 +10,7 @@
  * - lastAckedSeq 管理
  */
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { Q } from '@nozbe/watermelondb';
 import { Database } from '@nozbe/watermelondb';
 import { Message, Conversation, Friend, Group, GroupMember } from '../../../database/models';
@@ -30,6 +30,8 @@ interface UseChatSyncParams {
 }
 
 export const useChatSync = ({ database, conversationId, chatId, chatType }: UseChatSyncParams) => {
+  // 防止 syncMessagesFromServer 重复调用
+  const isSyncingRef = useRef(false);
   /**
    * 获取本地 lastAckedSeq
    */
@@ -401,6 +403,13 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
    * 从服务器同步消息
    */
   const syncMessagesFromServer = useCallback(async () => {
+    // 防止重复调用
+    if (isSyncingRef.current) {
+      logger.debug('useChatSync', 'syncMessagesFromServer already in progress, skipping');
+      return;
+    }
+    isSyncingRef.current = true;
+
     logger.debug('useChatSync', '=== syncMessagesFromServer START ===');
     try {
       const token = await getAuthToken();
@@ -574,10 +583,46 @@ export const useChatSync = ({ database, conversationId, chatId, chatType }: UseC
         }
       } else {
         logger.debug('useChatSync', 'No messages to sync');
+
+        // 即使没有新消息，也需要调用 ACK 并清除本地未读数
+        // 获取本地最大 seq 用于 ACK
+        if (database) {
+          const localMessages = await database.collections
+            .get<Message>('messages')
+            .query(
+              Q.where('conversation_id', Q.eq(conversationId)),
+              Q.sortBy('seq', Q.desc),
+              Q.take(1)
+            )
+            .fetch();
+
+          if (localMessages.length > 0 && localMessages[0].seq !== undefined) {
+            const lastSeq = localMessages[0].seq;
+            logger.debug('useChatSync', 'No new messages, but acking with local last seq:', lastSeq);
+            await ackMessages(lastSeq);
+          }
+
+          // 清除本地未读数
+          const conversations = await database.collections
+            .get<Conversation>('conversations')
+            .query(Q.where('conversation_id', Q.eq(conversationId)))
+            .fetch();
+
+          if (conversations.length > 0 && conversations[0].unreadCount !== 0) {
+            await database.write(async () => {
+              await conversations[0].update((c: Conversation) => {
+                c.unreadCount = 0;
+                c.updatedAt = Date.now();
+              });
+            });
+            logger.debug('useChatSync', 'Local unread count cleared (no new messages case)');
+          }
+        }
       }
     } catch (error: any) {
       logger.error('useChatSync', 'Sync error:', error.message);
     } finally {
+      isSyncingRef.current = false;
       logger.debug('useChatSync', '=== syncMessagesFromServer END ===');
     }
   }, [conversationId, chatType, chatId, database, ackMessages, syncGroupMembers]);

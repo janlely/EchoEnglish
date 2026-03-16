@@ -49,6 +49,7 @@ import logger from '../../utils/logger';
 import { isGroupDissolvedError } from '../../constants/errorCodes';
 import { EventBus, WebSocketError } from '../../events/EventBus';
 import { deleteMessage, ackMessages } from '../../api/conversations';
+import { messageService } from '../../services/MessageService';
 
 const ChatDetailScreen = () => {
   const navigation = useNavigation();
@@ -186,23 +187,19 @@ const ChatDetailScreen = () => {
 
   // 设置当前聊天 ID（用于消息服务判断是否需要增加未读数）
   useEffect(() => {
-    // 进入聊天页面时，调用同步接口获取未读消息并确认
-    const syncAndAck = async () => {
-      logger.info('ChatDetailScreen', 'Entering chat, syncing messages...');
-      await syncMessagesFromServer();
+    logger.info('ChatDetailScreen', 'Entering chat, setting current conversation:', conversationId);
+    messageService.setCurrentConversation(conversationId);
 
-      // 异步更新 lastAckedSeq（不阻塞 UI）
-      updateLastAckedSeqToMax().catch(err => {
-        logger.error('ChatDetailScreen', 'Error updating lastAckedSeq on enter:', err);
-      });
-    };
-
-    syncAndAck();
+    // 异步更新 lastAckedSeq（不阻塞 UI）
+    updateLastAckedSeqToMax().catch(err => {
+      logger.error('ChatDetailScreen', 'Error updating lastAckedSeq on enter:', err);
+    });
 
     return () => {
-      logger.info('ChatDetailScreen', 'Leaving chat');
+      logger.info('ChatDetailScreen', 'Leaving chat, clearing current conversation');
+      messageService.setCurrentConversation(null);
     };
-  }, [chatId, conversationId, syncMessagesFromServer, updateLastAckedSeqToMax]);
+  }, [conversationId, updateLastAckedSeqToMax]);
 
   // 订阅群组名称变更
   useEffect(() => {
@@ -340,6 +337,9 @@ const ChatDetailScreen = () => {
   // 当屏幕获得焦点时，刷新群组名称并标记消息为已读
   useFocusEffect(
     React.useCallback(() => {
+      // 设置当前会话（确保焦点恢复时也设置）
+      messageService.setCurrentConversation(conversationId);
+
       if (chatType === 'group' && database) {
         logger.debug('ChatDetailScreen', 'Focus effect triggered, checking for group name update');
         const fetchGroupName = async () => {
@@ -372,19 +372,19 @@ const ChatDetailScreen = () => {
         fetchGroupName();
       }
 
-      // 清除本地 conversation 的未读计数
+      // 清除本地 conversation 的未读计数（以防万一）
       database?.write(async () => {
         const conversations = await database.collections
           .get<Conversation>('conversations')
           .query(Q.where('conversation_id', Q.eq(conversationId)))
           .fetch();
 
-        if (conversations.length > 0) {
+        if (conversations.length > 0 && conversations[0].unreadCount !== 0) {
           await conversations[0].update((c: Conversation) => {
             c.unreadCount = 0;
             c.updatedAt = Date.now();
           });
-          logger.info('ChatDetailScreen', 'Local unread count cleared');
+          logger.info('ChatDetailScreen', 'Local unread count cleared on focus');
         }
       }).catch(err => {
         logger.error('ChatDetailScreen', 'Error clearing unread count:', err);
