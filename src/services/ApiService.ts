@@ -125,11 +125,19 @@ class ApiServiceClass {
     });
   }
 
-  async register(name: string, email: string, password: string) {
-    console.log('[ApiService] register: Called with email:', email);
+  async register(name: string, email: string, password: string, code?: string) {
+    console.log('[ApiService] register: Called with email:', email, 'code:', code ? 'provided' : 'not provided');
     return this.request<RegisterResponse>('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, code }),
+    });
+  }
+
+  async sendVerificationCodeForRegister(email: string, hcaptchaToken: string) {
+    console.log('[ApiService] sendVerificationCodeForRegister: Called with email:', email);
+    return this.request<ApiResponse<{}>>('/api/email-verification/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email, hcaptcha_token: hcaptchaToken }),
     });
   }
 

@@ -17,7 +17,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string, code?: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<AuthUser>) => void;
   isAuthenticated: boolean;
@@ -107,17 +107,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('[AuthContext] login: Complete');
   };
 
-  const register = async (name: string, email: string, password: string) => {
-    console.log('[AuthContext] register: Called with email:', email);
-    const data = await ApiService.register(name, email, password);
+  const register = async (name: string, email: string, password: string, code?: string) => {
+    console.log('[AuthContext] register: Called with email:', email, 'code:', code ? 'provided' : 'not provided');
+    const data = await ApiService.register(name, email, password, code);
 
-    // 注册成功后，只保存 token，不设置用户状态
-    // 用户需要去邮箱验证后，再通过登录流程进入应用
+    // 如果返回了 token，说明注册成功并已验证邮箱，直接登录
     if (data.data!.accessToken && data.data!.refreshToken) {
-      await ApiService.saveTokens(data.data!.accessToken, data.data!.refreshToken);
-    }
+      console.log('[AuthContext] register: Setting user from register response');
 
-    console.log('[AuthContext] register: Success, user should verify email');
+      setUser({
+        id: data.data!.user.id,
+        name: data.data!.user.name,
+        email: data.data!.user.email,
+        avatarUrl: data.data!.user.avatarUrl ?? undefined,
+      });
+
+      await ApiService.saveTokens(data.data!.accessToken, data.data!.refreshToken);
+      console.log('[AuthContext] register: Auto-login complete');
+    } else {
+      // 旧流程：只保存 token，不设置用户状态
+      // 用户需要去邮箱验证后，再通过登录流程进入应用
+      console.log('[AuthContext] register: Success, user should verify email');
+    }
   };
 
   const logout = async () => {

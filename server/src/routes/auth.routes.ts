@@ -13,6 +13,7 @@ const registerSchema = z.object({
     email: z.string().email('Invalid email address'),
     password: z.string().min(6, 'Password must be at least 6 characters'),
     name: z.string().min(1, 'Name is required'),
+    code: z.string().length(6, 'Verification code must be 6 digits').optional(),
   }),
 });
 

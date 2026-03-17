@@ -10,7 +10,11 @@ class AuthService {
   /**
    * Register a new user with email and password
    */
-  async register(email: string, password: string, name: string): Promise<UserData> {
+  async register(email: string, password: string, name: string, isEmailVerified: boolean = false): Promise<UserData | {
+    user: UserData;
+    accessToken: string;
+    refreshToken: string;
+  }> {
     try {
       // Check if user already exists
       const existingUser = await prisma.user.findUnique({
@@ -41,15 +45,36 @@ class AuthService {
         },
       });
 
+      // 如果邮箱已验证，更新 emailVerification 表的 userId
+      if (isEmailVerified) {
+        await prisma.emailVerification.updateMany({
+          where: { email },
+          data: { userId: user.id },
+        });
+      }
+
       logger.info(`User registered: ${email}`);
 
-      return {
+      const userData: UserData = {
         id: user.id,
         email: user.email,
         name: user.name,
         avatarUrl: user.avatarUrl || undefined,
         isOnline: user.isOnline,
       };
+
+      // 如果邮箱已验证，直接返回 token（自动登录）
+      if (isEmailVerified) {
+        const accessToken = this.generateToken(user, 'access');
+        const refreshToken = this.generateToken(user, 'refresh');
+        return {
+          user: userData,
+          accessToken,
+          refreshToken,
+        };
+      }
+
+      return userData;
     } catch (error: any) {
       logger.error('Register error:', error);
       throw error;

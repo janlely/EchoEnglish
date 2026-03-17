@@ -65,6 +65,89 @@ class EmailVerificationService {
   }
 
   /**
+   * 验证注册时的验证码（不需要用户已存在）
+   */
+  async verifyEmailForRegister(email: string, code: string): Promise<{ userId: string }> {
+    try {
+      const verification = await prisma.emailVerification.findUnique({
+        where: { email },
+      });
+
+      if (!verification) {
+        throw new Error('请先获取验证码');
+      }
+
+      if (verification.code !== code) {
+        throw new Error('验证码错误');
+      }
+
+      if (new Date() > verification.expiresAt) {
+        throw new Error('验证码已过期，请重新获取');
+      }
+
+      // 标记为已验证
+      await prisma.emailVerification.update({
+        where: { email },
+        data: { isVerified: true },
+      });
+
+      logger.info(`Email verified for registration: ${email}`);
+
+      return { userId: verification.userId };
+    } catch (error: any) {
+      logger.error('Verify email for register error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 为注册发送验证码（不需要用户已存在）
+   */
+  async sendCodeForRegister(email: string) {
+    try {
+      const code = this.generateCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 分钟过期
+
+      // 检查是否已有验证记录
+      const existing = await prisma.emailVerification.findUnique({
+        where: { email },
+      });
+
+      if (existing) {
+        // 更新现有记录
+        await prisma.emailVerification.update({
+          where: { email },
+          data: {
+            code,
+            expiresAt,
+            isVerified: false,
+          },
+        });
+      } else {
+        // 创建新记录，userId 暂时为空字符串（注册时会更新）
+        await prisma.emailVerification.create({
+          data: {
+            email,
+            code,
+            userId: 'pending',
+            expiresAt,
+          },
+        });
+      }
+
+      // 发送验证邮件
+      await this.sendVerificationEmail(email, code);
+
+      logger.info(`📧 Registration verification code sent to ${email}`);
+
+      return { success: true };
+    } catch (error: any) {
+      logger.error('Send code for register error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 验证邮箱
    */
   async verifyEmail(email: string, code: string) {

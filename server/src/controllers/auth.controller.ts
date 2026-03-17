@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { AuthRequest } from '../types';
+import { AuthRequest, UserData } from '../types';
 import authService from '../services/auth.service';
 import emailVerificationService from '../services/emailVerification.service';
 import logger from '../utils/logger';
@@ -10,7 +10,7 @@ class AuthController {
    */
   async register(req: Request, res: Response, next: NextFunction) {
     try {
-      const { email, password, name } = req.body;
+      const { email, password, name, code } = req.body;
 
       // Validate input
       if (!email || !password || !name) {
@@ -21,16 +21,38 @@ class AuthController {
         return;
       }
 
-      const user = await authService.register(email, password, name);
+      // 如果提供了验证码，先验证
+      let isEmailVerified = false;
+      if (code) {
+        await emailVerificationService.verifyEmailForRegister(email, code);
+        isEmailVerified = true;
+      }
 
-      // 发送邮箱验证码
-      await emailVerificationService.createVerificationCode(email, user.id);
+      // 注册用户
+      const result = await authService.register(email, password, name, isEmailVerified);
 
-      res.status(201).json({
-        success: true,
-        data: { user },
-        message: 'Registration successful. Please check your email for verification code.',
-      });
+      // 如果邮箱已验证，result 包含 token
+      if (isEmailVerified && 'accessToken' in result) {
+        res.status(201).json({
+          success: true,
+          data: {
+            user: result.user,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+          },
+          message: 'Registration successful',
+        });
+      } else {
+        // 旧流程：发送邮箱验证码
+        // result 是 UserData 类型
+        const user = result as UserData;
+        await emailVerificationService.createVerificationCode(email, user.id);
+        res.status(201).json({
+          success: true,
+          data: { user },
+          message: 'Registration successful. Please check your email for verification code.',
+        });
+      }
     } catch (error: any) {
       logger.error('Register controller error:', error);
       next(error);

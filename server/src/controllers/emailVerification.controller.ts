@@ -87,7 +87,7 @@ class EmailVerificationController {
   }
 
   /**
-   * 重新发送验证码
+   * 重新发送验证码（也用于注册场景）
    */
   async resendCode(req: Request, res: Response, next: NextFunction) {
     try {
@@ -124,12 +124,12 @@ class EmailVerificationController {
         return;
       }
 
-      // Captcha 验证通过，发送验证码
-      await emailVerificationService.resendCode(email, 'unknown');
+      // Captcha 验证通过，发送验证码（支持注册场景）
+      await emailVerificationService.sendCodeForRegister(email);
 
       res.status(200).json({
         success: true,
-        message: 'Verification code resent',
+        message: 'Verification code sent',
       });
     } catch (error: any) {
       logger.error('Resend code error:', error);

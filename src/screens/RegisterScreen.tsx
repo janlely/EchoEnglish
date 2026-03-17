@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useTheme } from '../hooks/useTheme';
+import Turnstile from '../components/Turnstile';
+import { TurnstileConfig } from '../config/appConfig';
+import { ApiService } from '../services/ApiService';
 
 type RegisterStackParamList = {
   Register: undefined;
@@ -31,9 +34,79 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // 验证码相关状态
+  const [verificationCode, setVerificationCode] = useState('');
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [showTurnstile, setShowTurnstile] = useState(false);
+
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 清理倒计时
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+      }
+    };
+  }, []);
+
+  const siteKey = TurnstileConfig.siteKey;
+
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
+  };
+
+  // 发送验证码 - 显示 Turnstile
+  const handleSendCodePress = () => {
+    if (!email.trim()) {
+      Alert.alert('提示', '请输入邮箱');
+      return;
+    }
+    if (!validateEmail(email)) {
+      Alert.alert('提示', '请输入有效的邮箱地址');
+      return;
+    }
+
+    setShowTurnstile(true);
+  };
+
+  // Turnstile 验证成功后发送验证码
+  const handleTurnstileVerify = async (token: string) => {
+    setShowTurnstile(false);
+    setSendingCode(true);
+
+    try {
+      await ApiService.sendVerificationCodeForRegister(email.trim(), token);
+      setCodeSent(true);
+      setCountdown(60);
+
+      // 开始倒计时
+      countdownRef.current = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            if (countdownRef.current) {
+              clearInterval(countdownRef.current);
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      Alert.alert('成功', '验证码已发送到您的邮箱');
+    } catch (error) {
+      Alert.alert('发送失败', error instanceof Error ? error.message : '请稍后重试');
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleTurnstileError = (error: string) => {
+    setShowTurnstile(false);
+    Alert.alert('验证失败', error || '请稍后重试');
   };
 
   const handleRegister = async () => {
@@ -58,21 +131,20 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
       return;
     }
 
+    if (!verificationCode.trim()) {
+      Alert.alert('提示', '请输入验证码');
+      return;
+    }
+
+    if (verificationCode.length !== 6) {
+      Alert.alert('提示', '验证码为 6 位数字');
+      return;
+    }
+
     setLoading(true);
     try {
-      await register(name.trim(), email.trim(), password);
-
-      // 注册成功，跳转到登录页面
-      Alert.alert(
-        '注册成功',
-        '请登录您的账号',
-        [
-          {
-            text: '确定',
-            onPress: () => navigation.navigate('Login'),
-          },
-        ]
-      );
+      await register(name.trim(), email.trim(), password, verificationCode);
+      // 注册成功后 AuthContext 会自动设置用户状态，自动跳转到主页
     } catch (error: unknown) {
       Alert.alert('注册失败', error instanceof Error ? error.message : '请稍后重试');
     } finally {
@@ -125,6 +197,41 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
               />
             </View>
 
+            {/* 验证码 */}
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>验证码</Text>
+              <View style={styles.codeRow}>
+                <TextInput
+                  style={[styles.input, styles.codeInput, { borderColor: colors.border, color: colors.textPrimary }]}
+                  placeholder="请输入 6 位验证码"
+                  placeholderTextColor={colors.textTertiary}
+                  value={verificationCode}
+                  onChangeText={setVerificationCode}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  editable={!loading}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.codeButton,
+                    { backgroundColor: colors.primary },
+                    (sendingCode || countdown > 0 || loading) && { backgroundColor: colors.textDisabled }
+                  ]}
+                  onPress={handleSendCodePress}
+                  disabled={sendingCode || countdown > 0 || loading}
+                >
+                  <Text style={[styles.codeButtonText, { color: colors.white }]}>
+                    {sendingCode ? '发送中...' : countdown > 0 ? `${countdown}s` : '发送验证码'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {codeSent && (
+                <Text style={[styles.codeHint, { color: colors.textTertiary }]}>
+                  验证码已发送到 {email}，10 分钟内有效
+                </Text>
+              )}
+            </View>
+
             <View style={styles.inputContainer}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>密码</Text>
               <TextInput
@@ -171,6 +278,15 @@ const RegisterScreen = ({ navigation }: { navigation: RegisterScreenNavigationPr
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Cloudflare Turnstile 验证 */}
+      <Turnstile
+        visible={showTurnstile}
+        siteKey={siteKey}
+        onVerify={handleTurnstileVerify}
+        onError={handleTurnstileError}
+        onClose={() => setShowTurnstile(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -243,6 +359,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 4,
+  },
+  codeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  codeInput: {
+    flex: 1,
+    marginRight: 12,
+  },
+  codeButton: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    minWidth: 110,
+    alignItems: 'center',
+  },
+  codeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  codeHint: {
+    fontSize: 12,
+    marginTop: 8,
   },
 });
 
